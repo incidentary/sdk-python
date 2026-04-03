@@ -29,6 +29,9 @@ IncidentaryEventType = Literal[
     "webhook_in",
     "webhook_out",
     "internal_task",
+    "db_query",
+    "grpc_in",
+    "grpc_out",
 ]
 IncidentaryEventClass = Literal["causal", "context"]
 
@@ -76,7 +79,7 @@ class SkeletonCe:
     kind: str
     status: int
     duration_ns: int
-    sdk_version: str = "0.1.0"
+    sdk_version: str = "0.2.0"
     captured_before_alert: Optional[bool] = None
     ring_buffer_seq: Optional[int] = None
     event_type: Optional[IncidentaryEventType] = None
