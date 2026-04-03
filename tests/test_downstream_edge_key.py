@@ -79,3 +79,88 @@ def test_distinct_route_templates_do_not_merge():
     )
 
     assert capture.key_for_hash != refund.key_for_hash
+
+
+# ── Edge cases and negative inputs ────────────────────────────────────
+
+
+_r = DownstreamEdgeKeyResolver()
+
+
+def test_empty_url_returns_unknown_quality():
+    resolved = _r.resolve(trace_id="t", method="GET", url="")
+    assert resolved.key_quality == "unknown"
+    assert resolved.edge_key == "unknown"
+    assert resolved.route_key == "/unknown"
+
+
+def test_whitespace_url_returns_unknown_quality():
+    resolved = _r.resolve(trace_id="t", method="GET", url="   ")
+    assert resolved.key_quality == "unknown"
+    assert resolved.edge_key == "unknown"
+
+
+def test_empty_method_defaults_to_get():
+    resolved = _r.resolve(trace_id="t", method="", url="https://svc.internal/api")
+    assert resolved.operation_key.startswith("GET ")
+    assert resolved.key_quality == "normalized_url"
+
+
+def test_none_metadata_does_not_crash():
+    resolved = _r.resolve(trace_id="t", method="GET", url="https://svc.internal/api", metadata=None)
+    assert resolved.key_quality == "normalized_url"
+    assert resolved.edge_key == "svc.internal"
+
+
+def test_scheme_only_url():
+    resolved = _r.resolve(trace_id="t", method="GET", url="https://")
+    assert resolved.key_quality == "unknown"
+    assert resolved.edge_key == "unknown"
+
+
+def test_url_with_no_path_component():
+    resolved = _r.resolve(trace_id="t", method="GET", url="https://service.internal")
+    assert resolved.key_quality == "normalized_url"
+    assert resolved.edge_key == "service.internal"
+    assert resolved.route_key == "/"
+
+
+def test_metadata_with_all_whitespace_fields():
+    resolved = _r.resolve(
+        trace_id="t",
+        method="GET",
+        url="https://svc.internal/api",
+        metadata={"retry_group_id": "  ", "route_template": "  "},
+    )
+    assert resolved.key_quality == "normalized_url"
+    assert resolved.edge_key == "svc.internal"
+
+
+def test_metadata_with_non_string_values():
+    resolved = _r.resolve(
+        trace_id="t",
+        method="GET",
+        url="https://svc.internal/api",
+        metadata={"retry_group_id": 42, "downstream_service": True},
+    )
+    assert resolved.key_quality == "normalized_url"
+    assert resolved.edge_key == "svc.internal"
+
+
+def test_path_only_url():
+    resolved = _r.resolve(trace_id="t", method="GET", url="/api/v1/users/123")
+    assert resolved.key_quality == "normalized_url"
+    assert resolved.edge_key == "local"
+    assert resolved.route_key == "/api/v1/users/:id"
+
+
+def test_url_with_query_only_no_path():
+    resolved = _r.resolve(trace_id="t", method="GET", url="https://svc?foo=bar")
+    assert resolved.edge_key == "svc"
+    assert resolved.route_key == "/"
+
+
+def test_very_long_url():
+    resolved = _r.resolve(trace_id="t", method="GET", url="https://svc.internal/" + "a" * 10_000)
+    assert resolved.key_quality == "normalized_url"
+    assert resolved.edge_key == "svc.internal"
