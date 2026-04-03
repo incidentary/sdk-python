@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from .base import Integration
 
@@ -24,7 +24,7 @@ class Psycopg2Integration(Integration):
 
     def __init__(self) -> None:
         self._patched = False
-        self._client: Optional[IncidentaryClient] = None
+        self._client: IncidentaryClient | None = None
         self._original_execute: Any = None
         self._original_executemany: Any = None
 
@@ -35,7 +35,7 @@ class Psycopg2Integration(Integration):
     def detect(self) -> bool:
         return importlib.util.find_spec("psycopg2") is not None
 
-    def patch(self, client: "IncidentaryClient") -> None:
+    def patch(self, client: IncidentaryClient) -> None:
         if self._patched:
             return
         try:
@@ -60,9 +60,7 @@ class Psycopg2Integration(Integration):
                     )
                     raise
 
-            def _patched_executemany(
-                cursor_self: Any, query: Any, vars_list: Any
-            ) -> Any:
+            def _patched_executemany(cursor_self: Any, query: Any, vars_list: Any) -> Any:
                 start_ns = time.perf_counter_ns()
                 try:
                     result = original_executemany(cursor_self, query, vars_list)

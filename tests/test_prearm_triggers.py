@@ -126,7 +126,10 @@ def test_slow_success_spike_transitions_to_severe():
 
     assert decision is not None
     assert decision.should_enter_prearm is True
-    assert any(reason.trigger_type == "slow_success" and reason.severity == "severe" for reason in decision.reasons)
+    assert any(
+        reason.trigger_type == "slow_success" and reason.severity == "severe"
+        for reason in decision.reasons
+    )
 
 
 def test_slow_success_low_sample_does_not_fire():
@@ -181,7 +184,9 @@ def test_inflight_growth_fires_severe():
             engine.on_request_complete(complete(), sec, sec * 1000)
 
         decision = engine.evaluate(CaptureMode.NORMAL, sec * 1000, sec, sec * 1000)
-        if decision is not None and any(reason.trigger_type == "in_flight_pileup" for reason in decision.reasons):
+        if decision is not None and any(
+            reason.trigger_type == "in_flight_pileup" for reason in decision.reasons
+        ):
             severe_seen = True
 
     assert severe_seen is True
@@ -277,12 +282,16 @@ def test_retry_stale_slots_reset_outside_window():
     )
 
     engine.on_request_complete(
-        complete(kind="HTTP_OUT", outbound_retry_key_hash=7, outbound_retry_key_quality="normalized_url"),
+        complete(
+            kind="HTTP_OUT", outbound_retry_key_hash=7, outbound_retry_key_quality="normalized_url"
+        ),
         1,
         1_000,
     )
     engine.on_request_complete(
-        complete(kind="HTTP_OUT", outbound_retry_key_hash=7, outbound_retry_key_quality="normalized_url"),
+        complete(
+            kind="HTTP_OUT", outbound_retry_key_hash=7, outbound_retry_key_quality="normalized_url"
+        ),
         1,
         1_010,
     )
@@ -291,7 +300,9 @@ def test_retry_stale_slots_reset_outside_window():
     assert first is not None
 
     engine.on_request_complete(
-        complete(kind="HTTP_OUT", outbound_retry_key_hash=7, outbound_retry_key_quality="normalized_url"),
+        complete(
+            kind="HTTP_OUT", outbound_retry_key_hash=7, outbound_retry_key_quality="normalized_url"
+        ),
         2,
         2_000,
     )

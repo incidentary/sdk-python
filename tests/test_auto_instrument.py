@@ -8,7 +8,7 @@ import urllib.request
 from unittest.mock import MagicMock, patch
 
 from incidentary.auto_instrument import auto_instrument, is_patched, undo_patches
-from incidentary.context import clear_trace_context, get_trace_context, set_trace_context
+from incidentary.context import clear_trace_context, set_trace_context
 from incidentary.types import PARENT_CE_HEADER, TRACE_ID_HEADER
 
 
@@ -23,15 +23,13 @@ class _EchoHeadersHandler(http.server.BaseHTTPRequestHandler):
 
     received_headers: dict[str, str] = {}
 
-    def do_GET(self):  # noqa: N802
-        _EchoHeadersHandler.received_headers = {
-            k.lower(): v for k, v in self.headers.items()
-        }
+    def do_GET(self):
+        _EchoHeadersHandler.received_headers = {k.lower(): v for k, v in self.headers.items()}
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"ok")
 
-    def log_message(self, format, *args):  # noqa: A002
+    def log_message(self, format, *args):
         pass  # suppress server logs during tests
 
 
@@ -62,7 +60,7 @@ class TestUrllibPatching:
             auto_instrument(client)
 
             set_trace_context("trace-abc", "ce-123")
-            urllib.request.urlopen(f"{base_url}/test")  # noqa: S310
+            urllib.request.urlopen(f"{base_url}/test")
 
             headers = _EchoHeadersHandler.received_headers
             assert headers.get(TRACE_ID_HEADER) == "trace-abc"
@@ -77,7 +75,7 @@ class TestUrllibPatching:
             auto_instrument(client)
 
             clear_trace_context()
-            urllib.request.urlopen(f"{base_url}/test")  # noqa: S310
+            urllib.request.urlopen(f"{base_url}/test")
 
             headers = _EchoHeadersHandler.received_headers
             assert TRACE_ID_HEADER not in headers
@@ -93,7 +91,7 @@ class TestUrllibPatching:
             auto_instrument(client)
 
             set_trace_context("trace-str", "ce-str")
-            urllib.request.urlopen(f"{base_url}/string-url")  # noqa: S310
+            urllib.request.urlopen(f"{base_url}/string-url")
 
             headers = _EchoHeadersHandler.received_headers
             assert headers.get(TRACE_ID_HEADER) == "trace-str"
@@ -109,7 +107,7 @@ class TestUrllibPatching:
 
             set_trace_context("trace-req", "ce-req")
             req = urllib.request.Request(f"{base_url}/request-obj")
-            urllib.request.urlopen(req)  # noqa: S310
+            urllib.request.urlopen(req)
 
             headers = _EchoHeadersHandler.received_headers
             assert headers.get(TRACE_ID_HEADER) == "trace-req"
@@ -124,7 +122,7 @@ class TestUrllibPatching:
             auto_instrument(client)
 
             set_trace_context("trace-event", "ce-event")
-            urllib.request.urlopen(f"{base_url}/test")  # noqa: S310
+            urllib.request.urlopen(f"{base_url}/test")
 
             client.record_event.assert_called_once()
             call_args = client.record_event.call_args
@@ -146,7 +144,7 @@ class TestUrllibPatching:
 
             # After undo, no headers should be injected even with context
             set_trace_context("trace-undo", "ce-undo")
-            urllib.request.urlopen(f"{base_url}/test")  # noqa: S310
+            urllib.request.urlopen(f"{base_url}/test")
 
             headers = _EchoHeadersHandler.received_headers
             assert TRACE_ID_HEADER not in headers
@@ -230,9 +228,10 @@ class TestRequestsPatching:
 
     def test_requests_with_active_context_injects_headers(self):
         try:
-            import requests  # noqa: F401
+            import requests
         except ImportError:
             import pytest
+
             pytest.skip("requests not installed")
 
         server, base_url = _start_test_server()
@@ -252,9 +251,10 @@ class TestRequestsPatching:
 
     def test_requests_without_context_does_not_inject_headers(self):
         try:
-            import requests  # noqa: F401
+            import requests
         except ImportError:
             import pytest
+
             pytest.skip("requests not installed")
 
         server, base_url = _start_test_server()
@@ -274,9 +274,10 @@ class TestRequestsPatching:
 
     def test_requests_records_http_out_event(self):
         try:
-            import requests  # noqa: F401
+            import requests
         except ImportError:
             import pytest
+
             pytest.skip("requests not installed")
 
         server, base_url = _start_test_server()
@@ -324,7 +325,156 @@ class TestNoThrowGuarantee:
 
             set_trace_context("trace-err", "ce-err")
             # Should not raise despite record_event failure
-            response = urllib.request.urlopen(f"{base_url}/test")  # noqa: S310
+            response = urllib.request.urlopen(f"{base_url}/test")
             assert response.read() == b"ok"
         finally:
             server.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# _record_http_out edge cases
+# ---------------------------------------------------------------------------
+
+
+def _get_ai_module():
+    """Get the auto_instrument module (not the function) via sys.modules."""
+    import sys
+
+    return sys.modules["incidentary.auto_instrument"]
+
+
+class TestRecordHttpOut:
+    """Tests for the _record_http_out helper function."""
+
+    def setup_method(self):
+        clear_trace_context()
+        undo_patches()
+
+    def teardown_method(self):
+        clear_trace_context()
+        undo_patches()
+
+    def test_record_http_out_no_client(self):
+        """When _client_ref is None, _record_http_out should not raise."""
+        from incidentary.auto_instrument import _record_http_out
+
+        # Should not raise
+        _record_http_out(start_ns=0, status_code=200)
+
+    def test_record_http_out_with_client_and_context(self):
+        """When client and context are available, record_event should be called."""
+        ai_mod = _get_ai_module()
+        client = _make_stub_client()
+        ai_mod._client_ref = client
+
+        set_trace_context("trace-rec", "ce-rec")
+        ai_mod._record_http_out(start_ns=0, status_code=200)
+
+        client.record_event.assert_called_once()
+        call_args = client.record_event.call_args
+        assert call_args[0][0] == "http_out"
+
+        ai_mod._client_ref = None
+
+    def test_record_http_out_without_context(self):
+        """When no trace context, record_event should still be called."""
+        ai_mod = _get_ai_module()
+        client = _make_stub_client()
+        ai_mod._client_ref = client
+
+        clear_trace_context()
+        ai_mod._record_http_out(start_ns=0, status_code=500)
+
+        client.record_event.assert_called_once()
+        opts = client.record_event.call_args[0][1]
+        assert opts.trace_id is None
+        assert opts.parent_ce_id is None
+
+        ai_mod._client_ref = None
+
+    def test_record_http_out_exception_in_record_event(self):
+        """If record_event raises, _record_http_out must not propagate."""
+        ai_mod = _get_ai_module()
+        client = _make_stub_client()
+        client.record_event.side_effect = RuntimeError("boom")
+        ai_mod._client_ref = client
+
+        # Should not raise
+        ai_mod._record_http_out(start_ns=0, status_code=200)
+        ai_mod._client_ref = None
+
+
+# ---------------------------------------------------------------------------
+# urllib error status propagation
+# ---------------------------------------------------------------------------
+
+
+class TestUrllibErrorPropagation:
+    """Test that HTTP errors during urlopen propagate correctly."""
+
+    def setup_method(self):
+        clear_trace_context()
+        undo_patches()
+
+    def teardown_method(self):
+        clear_trace_context()
+        undo_patches()
+
+    def test_urlopen_http_error_reraises_and_records(self):
+        """urllib HTTPErrors should re-raise but still record the event."""
+        import io
+        import urllib.error
+
+        import pytest
+
+        def failing_urlopen(url, data=None, *args, **kwargs):
+            raise urllib.error.HTTPError(
+                url="http://test",
+                code=502,
+                msg="Bad Gateway",
+                hdrs=None,
+                fp=io.BytesIO(b"error"),
+            )
+
+        # Replace urlopen *before* auto_instrument so the closure captures it
+        original = urllib.request.urlopen
+        urllib.request.urlopen = failing_urlopen
+        try:
+            client = _make_stub_client()
+            auto_instrument(client)
+            set_trace_context("trace-err", "ce-err")
+
+            with pytest.raises(urllib.error.HTTPError):
+                urllib.request.urlopen("http://test/fail")
+
+            client.record_event.assert_called_once()
+            opts = client.record_event.call_args[0][1]
+            assert opts.status == 502
+        finally:
+            undo_patches()
+            urllib.request.urlopen = original
+
+    def test_urlopen_generic_error_reraises_and_records(self):
+        """Non-HTTP errors should re-raise and record status 0."""
+        import pytest
+
+        def failing_urlopen(url, data=None, *args, **kwargs):
+            raise ConnectionError("connection refused")
+
+        original = urllib.request.urlopen
+        urllib.request.urlopen = failing_urlopen
+        try:
+            client = _make_stub_client()
+            auto_instrument(client)
+            set_trace_context("trace-conn", "ce-conn")
+
+            with pytest.raises(ConnectionError):
+                urllib.request.urlopen("http://test/fail")
+
+            client.record_event.assert_called_once()
+            opts = client.record_event.call_args[0][1]
+            # status_code=0 maps to status=None (only set when > 0)
+            assert opts.status is None
+        finally:
+            undo_patches()
+            urllib.request.urlopen = original

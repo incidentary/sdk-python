@@ -42,9 +42,7 @@ def test_trace_context_available_inside_handler():
     # Both IDs should be UUID-shaped strings
     import re
 
-    uuid_pattern = re.compile(
-        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-    )
+    uuid_pattern = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
     assert captured["trace_id"] is not None
     assert uuid_pattern.match(captured["trace_id"])
     assert captured["ce_id"] is not None

@@ -11,9 +11,9 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-from .base import Integration
 from ..context import clear_trace_context, get_trace_context, set_trace_context
 from ..types import PARENT_CE_HEADER, TRACE_ID_HEADER, RecordEventOptions
+from .base import Integration
 
 if TYPE_CHECKING:
     from ..client import IncidentaryClient
@@ -79,12 +79,12 @@ class _ClientCallDetails:
     """Immutable replacement for grpc.ClientCallDetails with updated metadata."""
 
     __slots__ = (
+        "compression",
+        "credentials",
+        "metadata",
         "method",
         "timeout",
-        "metadata",
-        "credentials",
         "wait_for_ready",
-        "compression",
     )
 
     def __init__(

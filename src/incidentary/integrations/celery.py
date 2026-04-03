@@ -46,7 +46,7 @@ class CeleryIntegration(Integration):
     def detect(self) -> bool:
         return importlib.util.find_spec("celery") is not None
 
-    def patch(self, client: "IncidentaryClient") -> None:
+    def patch(self, client: IncidentaryClient) -> None:
         if self._patched:
             return
         try:
@@ -76,15 +76,17 @@ class CeleryIntegration(Integration):
                 except Exception:
                     pass
 
-            def _on_prerun(
-                sender: Any, task_id: Any, task: Any, **kwargs: Any
-            ) -> None:
+            def _on_prerun(sender: Any, task_id: Any, task: Any, **kwargs: Any) -> None:
                 try:
                     from ..context import set_trace_context
 
                     request = task.request
-                    trace_id = request.get("_incidentary_trace_id") if isinstance(request, dict) else None
-                    ce_id = request.get("_incidentary_ce_id") if isinstance(request, dict) else None
+                    trace_id = (
+                        request.get("_incidentary_trace_id") if isinstance(request, dict) else None
+                    )
+                    ce_id = (
+                        request.get("_incidentary_ce_id") if isinstance(request, dict) else None
+                    )
                     if trace_id:
                         set_trace_context(trace_id, ce_id or "")
                     # Cap dict size to prevent unbounded memory growth
@@ -95,9 +97,7 @@ class CeleryIntegration(Integration):
                 except Exception:
                     pass
 
-            def _on_postrun(
-                sender: Any, task_id: Any, task: Any, **kwargs: Any
-            ) -> None:
+            def _on_postrun(sender: Any, task_id: Any, task: Any, **kwargs: Any) -> None:
                 try:
                     from ..context import clear_trace_context, get_trace_context
                     from ..types import RecordEventOptions
@@ -105,9 +105,7 @@ class CeleryIntegration(Integration):
                     ctx = get_trace_context()
                     start_ns = self._task_start_ns.pop(str(task_id), None)
                     duration_ns = (
-                        max(0, time.perf_counter_ns() - start_ns)
-                        if start_ns is not None
-                        else 0
+                        max(0, time.perf_counter_ns() - start_ns) if start_ns is not None else 0
                     )
                     _client = self._client
                     if _client is not None:

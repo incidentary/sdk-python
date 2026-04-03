@@ -8,9 +8,6 @@ from __future__ import annotations
 import sys
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -36,9 +33,11 @@ def _build_fake_flask():
 
 def _make_simple_wsgi_app():
     """Return a simple callable wsgi app."""
+
     def app(environ, start_response):
         start_response("200 OK", [])
         return [b"OK"]
+
     return app
 
 
@@ -162,7 +161,6 @@ class TestFlaskPatch:
     def test_new_flask_app_has_wsgi_app_wrapped(self):
         """After patching, new Flask() instances should have their wsgi_app wrapped."""
         fake_flask = _build_fake_flask()
-        original_wsgi_app = None
 
         with patch.dict(sys.modules, {"flask": fake_flask}):
             from incidentary.integrations.flask import FlaskIntegration

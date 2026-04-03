@@ -8,9 +8,6 @@ from __future__ import annotations
 import sys
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -206,8 +203,6 @@ class TestKombuProducerPatch:
     def test_publish_injects_trace_id_into_headers(self):
         fake_kombu = _build_fake_kombu()
         captured = {}
-
-        original_publish = fake_kombu.Producer.publish
 
         def recording_publish(self, body, routing_key=None, **kwargs):
             captured.update(kwargs)

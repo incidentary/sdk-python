@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import functools
 import uuid
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from .context import clear_trace_context, set_trace_context
 

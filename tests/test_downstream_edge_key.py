@@ -107,7 +107,9 @@ def test_empty_method_defaults_to_get():
 
 
 def test_none_metadata_does_not_crash():
-    resolved = _r.resolve(trace_id="t", method="GET", url="https://svc.internal/api", metadata=None)
+    resolved = _r.resolve(
+        trace_id="t", method="GET", url="https://svc.internal/api", metadata=None
+    )
     assert resolved.key_quality == "normalized_url"
     assert resolved.edge_key == "svc.internal"
 

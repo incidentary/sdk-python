@@ -6,10 +6,9 @@ asyncpg is mocked throughout; it does not need to be installed.
 from __future__ import annotations
 
 import sys
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -484,8 +483,8 @@ class TestAsyncpgTraceContext:
 
 class TestAsyncpgABCConformance:
     def test_asyncpg_integration_is_instance_of_integration_abc(self):
-        from incidentary.integrations.base import Integration
         from incidentary.integrations.asyncpg_integration import AsyncpgIntegration
+        from incidentary.integrations.base import Integration
 
         assert isinstance(AsyncpgIntegration(), Integration)
 

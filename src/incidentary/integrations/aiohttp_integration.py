@@ -35,7 +35,7 @@ class AiohttpIntegration(Integration):
     def detect(self) -> bool:
         return importlib.util.find_spec("aiohttp") is not None
 
-    def patch(self, client: "IncidentaryClient") -> None:
+    def patch(self, client: IncidentaryClient) -> None:
         if self._patched:
             return
         try:

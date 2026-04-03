@@ -7,10 +7,8 @@ import logging
 import threading
 import time
 import uuid
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
-from typing import Callable, Iterable, Optional
-
-logger = logging.getLogger("incidentary.client")
 
 from .integrations import Integration, IntegrationRegistry, default_integrations
 from .prearm_triggers import (
@@ -18,7 +16,6 @@ from .prearm_triggers import (
     RequestSignal,
     RetryConfig,
     SlowSuccessConfig,
-    TriggerDecision,
     TriggerEngine,
     TriggerEngineConfig,
     TriggerReason,
@@ -35,6 +32,8 @@ from .types import (
     RecordRequestOptions,
     SkeletonCe,
 )
+
+logger = logging.getLogger("incidentary.client")
 
 _DEFAULT_DETAIL_REQUEST_HEADER_ALLOWLIST = [
     "content-type",
@@ -184,15 +183,15 @@ class IncidentaryClient:
         pre_arm_detail_capture_enabled: bool = True,
         pre_arm_detail_capture_payload_enabled: bool = False,
         pre_arm_detail_max_payload_bytes: int = 4_096,
-        pre_arm_detail_request_header_allowlist: Optional[Iterable[str]] = None,
-        pre_arm_detail_response_header_allowlist: Optional[Iterable[str]] = None,
-        redact_fields: Optional[Iterable[str]] = None,
+        pre_arm_detail_request_header_allowlist: Iterable[str] | None = None,
+        pre_arm_detail_response_header_allowlist: Iterable[str] | None = None,
+        redact_fields: Iterable[str] | None = None,
         pre_arm_eval_shards: int = 16,
         pre_arm_eval_batch_size: int = 1,
         timeout_ms: int = 5_000,
-        on_error: Optional[Callable[[Exception], None]] = None,
+        on_error: Callable[[Exception], None] | None = None,
         auto_instrument: bool = True,
-        integrations: Optional[list[Integration]] = None,
+        integrations: list[Integration] | None = None,
     ):
         resolved_base_url = (base_url or api_url or "").strip().rstrip("/")
         self.service_name = service_name
@@ -278,22 +277,20 @@ class IncidentaryClient:
         ]
         self._redact_fields = {
             field.lower().strip()
-            for field in (
-                redact_fields if redact_fields is not None else _DEFAULT_REDACT_FIELDS
-            )
+            for field in (redact_fields if redact_fields is not None else _DEFAULT_REDACT_FIELDS)
             if field is not None and str(field).strip()
         }
 
         self._lock = threading.Lock()
-        self._pre_arm_started_at: Optional[int] = None
-        self._pre_arm_timer: Optional[threading.Timer] = None
-        self._last_pre_arm_ended_at: Optional[int] = None
+        self._pre_arm_started_at: int | None = None
+        self._pre_arm_timer: threading.Timer | None = None
+        self._last_pre_arm_ended_at: int | None = None
         self._pre_arm_window_seq = 0
-        self._pre_arm_alerted_at_ns: Optional[int] = None
+        self._pre_arm_alerted_at_ns: int | None = None
         self._pre_arm_ring_buffer_seq = 0
 
-        self._active_pre_arm_window: Optional[PreArmWindow] = None
-        self._recent_pre_arm_windows: list[Optional[PreArmWindow]] = [None] * 8
+        self._active_pre_arm_window: PreArmWindow | None = None
+        self._recent_pre_arm_windows: list[PreArmWindow | None] = [None] * 8
         self._recent_pre_arm_write_index = 0
 
         self._pre_arm_enter_total = 0
@@ -303,7 +300,7 @@ class IncidentaryClient:
         self._eval_batch_size = max(1, pre_arm_eval_batch_size)
         self._last_eval_wall_ms = 0
 
-        self._registry: Optional[IntegrationRegistry] = None
+        self._registry: IntegrationRegistry | None = None
         if auto_instrument:
             try:
                 active_integrations = (
@@ -349,27 +346,19 @@ class IncidentaryClient:
                     },
                     "gauges": {
                         "current_prearm_state": self._mode.value,
-                        "current_in_flight": snapshot.in_flight_pileup.get(
-                            "current_in_flight", 0
-                        ),
+                        "current_in_flight": snapshot.in_flight_pileup.get("current_in_flight", 0),
                         "slow_success_rate_10s": snapshot.slow_success.get(
                             "slow_success_rate_pct", 0.0
                         ),
-                        "retry_rate_10s": snapshot.retry_onset.get(
-                            "retry_rate_pct", 0.0
-                        ),
+                        "retry_rate_10s": snapshot.retry_onset.get("retry_rate_pct", 0.0),
                         "retry_normalized_url_fallback_rate_10s": snapshot.retry_onset.get(
                             "normalized_url_fallback_rate_10s", 0.0
                         ),
-                        "current_trigger_reasons_count": len(
-                            self._active_pre_arm_window.reasons
-                        )
+                        "current_trigger_reasons_count": len(self._active_pre_arm_window.reasons)
                         if self._active_pre_arm_window is not None
                         else 0,
                     },
-                    "retry_key_quality_10s": snapshot.retry_onset.get(
-                        "retry_key_quality_10s", {}
-                    ),
+                    "retry_key_quality_10s": snapshot.retry_onset.get("retry_key_quality_10s", {}),
                     "retry_key_quality_total": snapshot.retry_onset.get(
                         "retry_key_quality_total", {}
                     ),
@@ -413,14 +402,12 @@ class IncidentaryClient:
         except Exception:
             pass
 
-    def flush_to_backend(self, incident_id: Optional[str] = None) -> None:
+    def flush_to_backend(self, incident_id: str | None = None) -> None:
         try:
             with self._lock:
                 mode = "FULL" if self._mode != CaptureMode.NORMAL else "SKELETON"
                 events = self._annotate_buffered_events_locked(self._buffer.flush())
-            self._transport.upload_batch(
-                events, capture_mode=mode, incident_id=incident_id
-            )
+            self._transport.upload_batch(events, capture_mode=mode, incident_id=incident_id)
         except Exception:
             pass
 
@@ -433,7 +420,7 @@ class IncidentaryClient:
             pass
 
     def record_request(
-        self, status_code: int, options: Optional[RecordRequestOptions | dict] = None
+        self, status_code: int, options: RecordRequestOptions | dict | None = None
     ) -> None:
         try:
             opts = self._normalize_request_options(options)
@@ -449,9 +436,7 @@ class IncidentaryClient:
                 outbound_retry_key_quality=opts.outbound_retry_key_quality,
                 explicit_retry_observed=opts.explicit_retry_observed,
             )
-            self._trigger_engine.on_request_complete(
-                signal, clock.wall_sec, clock.mono_ms
-            )
+            self._trigger_engine.on_request_complete(signal, clock.wall_sec, clock.mono_ms)
             self._schedule_evaluation(signal.kind, force=(status_code >= 500))
         except Exception:
             pass
@@ -459,7 +444,7 @@ class IncidentaryClient:
     def record_event(
         self,
         event_type: IncidentaryEventType,
-        options: Optional[RecordEventOptions] = None,
+        options: RecordEventOptions | None = None,
     ) -> None:
         try:
             opts = options if options is not None else RecordEventOptions()
@@ -485,26 +470,22 @@ class IncidentaryClient:
         except Exception:
             pass
 
-    def record_queue_publish(
-        self, options: Optional[RecordEventOptions] = None
-    ) -> None:
+    def record_queue_publish(self, options: RecordEventOptions | None = None) -> None:
         self.record_event("queue_publish", options)
 
-    def record_queue_consume(
-        self, options: Optional[RecordEventOptions] = None
-    ) -> None:
+    def record_queue_consume(self, options: RecordEventOptions | None = None) -> None:
         self.record_event("queue_consume", options)
 
-    def record_job_start(self, options: Optional[RecordEventOptions] = None) -> None:
+    def record_job_start(self, options: RecordEventOptions | None = None) -> None:
         self.record_event("job_start", options)
 
-    def record_job_end(self, options: Optional[RecordEventOptions] = None) -> None:
+    def record_job_end(self, options: RecordEventOptions | None = None) -> None:
         self.record_event("job_end", options)
 
-    def record_webhook_in(self, options: Optional[RecordEventOptions] = None) -> None:
+    def record_webhook_in(self, options: RecordEventOptions | None = None) -> None:
         self.record_event("webhook_in", options)
 
-    def record_webhook_out(self, options: Optional[RecordEventOptions] = None) -> None:
+    def record_webhook_out(self, options: RecordEventOptions | None = None) -> None:
         self.record_event("webhook_out", options)
 
     def should_capture_detail_for_current_mode(self) -> bool:
@@ -516,9 +497,7 @@ class IncidentaryClient:
     def get_detail_response_header_allowlist(self) -> list[str]:
         return list(self._detail_response_header_allowlist)
 
-    def attach_detail_to_event(
-        self, ce: SkeletonCe, detail: Optional[CeDetail]
-    ) -> SkeletonCe:
+    def attach_detail_to_event(self, ce: SkeletonCe, detail: CeDetail | None) -> SkeletonCe:
         if not self.should_capture_detail_for_current_mode() or detail is None:
             return ce
 
@@ -537,7 +516,7 @@ class IncidentaryClient:
         ce.detail = materialized
         return ce
 
-    def escalate_to_incident(self, incident_id: Optional[str] = None) -> None:
+    def escalate_to_incident(self, incident_id: str | None = None) -> None:
         with self._lock:
             if self._mode != CaptureMode.INCIDENT:
                 self._mode = CaptureMode.INCIDENT
@@ -716,9 +695,7 @@ class IncidentaryClient:
             },
         )
 
-    def _annotate_buffered_events_locked(
-        self, events: list[SkeletonCe]
-    ) -> list[SkeletonCe]:
+    def _annotate_buffered_events_locked(self, events: list[SkeletonCe]) -> list[SkeletonCe]:
         if not events:
             return events
 
@@ -802,9 +779,7 @@ class IncidentaryClient:
             self._recent_pre_arm_windows
         )
 
-    def _build_legacy_5xx_reason(
-        self, error_rate_pct: float, now_ms: int
-    ) -> TriggerReason:
+    def _build_legacy_5xx_reason(self, error_rate_pct: float, now_ms: int) -> TriggerReason:
         return TriggerReason(
             trigger_type="error_rate_5xx",
             severity="severe",
@@ -830,7 +805,7 @@ class IncidentaryClient:
 
     @staticmethod
     def _normalize_request_options(
-        options: Optional[RecordRequestOptions | dict],
+        options: RecordRequestOptions | dict | None,
     ) -> RecordRequestOptions:
         if options is None:
             return RecordRequestOptions()
@@ -841,9 +816,7 @@ class IncidentaryClient:
                 kind=options.get("kind", "HTTP_IN"),
                 duration_ns=int(options.get("duration_ns", 0)),
                 cancelled=bool(options.get("cancelled", False)),
-                timed_out=bool(
-                    options.get("timed_out", options.get("timedOut", False))
-                ),
+                timed_out=bool(options.get("timed_out", options.get("timedOut", False))),
                 outbound_retry_key_hash=int(
                     options.get(
                         "outbound_retry_key_hash",
@@ -861,9 +834,7 @@ class IncidentaryClient:
             )
         return RecordRequestOptions()
 
-    def _dedupe_reasons(
-        self, reasons: list[TriggerReason]
-    ) -> list[PreArmTriggerReason]:
+    def _dedupe_reasons(self, reasons: list[TriggerReason]) -> list[PreArmTriggerReason]:
         latest: dict[str, TriggerReason] = {}
         for reason in reasons:
             previous = latest.get(reason.trigger_type)
@@ -886,7 +857,7 @@ class IncidentaryClient:
         ]
 
     @staticmethod
-    def _window_to_dict(window: Optional[PreArmWindow]) -> Optional[dict[str, object]]:
+    def _window_to_dict(window: PreArmWindow | None) -> dict[str, object] | None:
         if window is None:
             return None
         return asdict(window)
@@ -903,7 +874,7 @@ class IncidentaryClient:
             return True
         return False
 
-    def _normalize_payload_snippet(self, raw: str) -> Optional[str]:
+    def _normalize_payload_snippet(self, raw: str) -> str | None:
         max_bytes = self._detail_max_payload_bytes
         if max_bytes <= 0:
             return None

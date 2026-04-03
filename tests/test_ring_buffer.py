@@ -61,7 +61,9 @@ def test_flush_returns_sorted_by_wall_ts():
     buf.write(ce3)
 
     flushed = buf.flush()
-    assert [ce.wall_ts_ns for ce in flushed] == sorted([ce1.wall_ts_ns, ce2.wall_ts_ns, ce3.wall_ts_ns])
+    assert [ce.wall_ts_ns for ce in flushed] == sorted(
+        [ce1.wall_ts_ns, ce2.wall_ts_ns, ce3.wall_ts_ns]
+    )
 
 
 def test_concurrent_writes_no_corruption():

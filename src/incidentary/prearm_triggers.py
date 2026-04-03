@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Dict, List, Literal, Optional
+from typing import Literal
 
 from .downstream_edge_key import RetryKeyQuality
 from .types import CaptureMode
@@ -31,7 +31,7 @@ class TriggerReason:
     threshold_label: str
     fired_at_unix_ms: int
     summary: str
-    details: Dict[str, float | int | str]
+    details: dict[str, float | int | str]
 
 
 @dataclass(frozen=True)
@@ -43,23 +43,23 @@ class RequestSignal:
     timed_out: bool
     outbound_retry_key_hash: int
     outbound_retry_key_quality: RetryKeyQuality
-    explicit_retry_observed: Optional[bool]
+    explicit_retry_observed: bool | None
 
 
 @dataclass
 class TriggerDecision:
     should_enter_prearm: bool
-    reasons: List[TriggerReason]
+    reasons: list[TriggerReason]
 
 
 @dataclass
 class TriggerEngineSnapshot:
-    disabled: Dict[str, bool]
-    totals: Dict[str, int]
-    slow_success: Dict[str, float | int | None]
-    in_flight_pileup: Dict[str, float | int | None]
-    retry_onset: Dict[str, float | int | None | Dict[str, int]]
-    last_trigger: Optional[TriggerReason]
+    disabled: dict[str, bool]
+    totals: dict[str, int]
+    slow_success: dict[str, float | int | None]
+    in_flight_pileup: dict[str, float | int | None]
+    retry_onset: dict[str, float | int | None | dict[str, int]]
+    last_trigger: TriggerReason | None
     recent_mild_trigger_count: int
 
 
@@ -130,13 +130,15 @@ class SlowSuccessTrigger:
         self._slow = [0] * WINDOW_BUCKETS
         self._bucket_sec = [-1] * WINDOW_BUCKETS
         self._ewma_ns = 0.0
-        self._last_severity: Optional[TriggerSeverity] = None
+        self._last_severity: TriggerSeverity | None = None
 
     def on_request_complete(self, signal: RequestSignal, now_sec: int) -> None:
         if not self._is_success_like(signal):
             return
 
-        duration = int(_clamp(signal.duration_ns, self._cfg.min_baseline_ns, self._cfg.max_baseline_ns))
+        duration = int(
+            _clamp(signal.duration_ns, self._cfg.min_baseline_ns, self._cfg.max_baseline_ns)
+        )
         baseline = self._ewma_ns if self._ewma_ns > 0 else duration
         slow_threshold = self._slow_threshold(int(baseline))
 
@@ -148,7 +150,7 @@ class SlowSuccessTrigger:
         if signal.duration_ns > slow_threshold:
             self._slow[idx] += 1
 
-    def evaluate(self, now_ms: int, now_sec: int) -> Optional[TriggerReason]:
+    def evaluate(self, now_ms: int, now_sec: int) -> TriggerReason | None:
         total, slow, rate_bps = self._collect_window(now_sec)
         current = self._classify(total, slow)
         previous = self._last_severity
@@ -161,7 +163,9 @@ class SlowSuccessTrigger:
         if previous == "severe":
             return None
 
-        threshold_bps = _to_rate_bps(self._cfg.high_rate if current == "severe" else self._cfg.mild_rate)
+        threshold_bps = _to_rate_bps(
+            self._cfg.high_rate if current == "severe" else self._cfg.mild_rate
+        )
         return TriggerReason(
             trigger_type="slow_success",
             severity=current,
@@ -180,11 +184,13 @@ class SlowSuccessTrigger:
                 "slow_success_like_10s": slow,
                 "slow_success_rate_pct": _bps_to_pct(rate_bps),
                 "ewma_success_duration_ns": int(self._ewma_ns),
-                "slow_threshold_ns": self._slow_threshold(int(self._ewma_ns or self._cfg.min_slow_duration_ns)),
+                "slow_threshold_ns": self._slow_threshold(
+                    int(self._ewma_ns or self._cfg.min_slow_duration_ns)
+                ),
             },
         )
 
-    def snapshot(self, now_sec: int) -> Dict[str, float | int | None]:
+    def snapshot(self, now_sec: int) -> dict[str, float | int | None]:
         total, slow, rate_bps = self._collect_window(now_sec)
         return {
             "severity": self._classify(total, slow),
@@ -192,7 +198,9 @@ class SlowSuccessTrigger:
             "slow_success_like_10s": slow,
             "slow_success_rate_pct": _bps_to_pct(rate_bps),
             "ewma_success_duration_ns": int(self._ewma_ns),
-            "slow_threshold_ns": self._slow_threshold(int(self._ewma_ns or self._cfg.min_slow_duration_ns)),
+            "slow_threshold_ns": self._slow_threshold(
+                int(self._ewma_ns or self._cfg.min_slow_duration_ns)
+            ),
         }
 
     def reset(self) -> None:
@@ -213,7 +221,7 @@ class SlowSuccessTrigger:
                 slow += self._slow[i]
         return total, slow, _rate_bps(slow, total)
 
-    def _classify(self, total: int, slow: int) -> Optional[TriggerSeverity]:
+    def _classify(self, total: int, slow: int) -> TriggerSeverity | None:
         if total < self._cfg.min_samples:
             return None
         rate = _rate_bps(slow, total)
@@ -235,9 +243,7 @@ class SlowSuccessTrigger:
             return False
         if 200 <= signal.status_code < 400:
             return True
-        if self._cfg.include_4xx_as_success_like and 400 <= signal.status_code < 500:
-            return True
-        return False
+        return bool(self._cfg.include_4xx_as_success_like and 400 <= signal.status_code < 500)
 
     def _update_ewma(self, duration_ns: int) -> None:
         if self._ewma_ns <= 0:
@@ -247,7 +253,7 @@ class SlowSuccessTrigger:
         self._ewma_ns = _clamp(next_value, self._cfg.min_baseline_ns, self._cfg.max_baseline_ns)
 
     def _slow_threshold(self, baseline_ns: int) -> int:
-        return max(self._cfg.min_slow_duration_ns, int(round(baseline_ns * self._cfg.slow_multiplier)))
+        return max(self._cfg.min_slow_duration_ns, round(baseline_ns * self._cfg.slow_multiplier))
 
 
 class InFlightPileupTrigger:
@@ -260,9 +266,9 @@ class InFlightPileupTrigger:
 
         self._current_in_flight = 0
         self._ewma_peak = 0.0
-        self._condition_start_mono: Optional[int] = None
+        self._condition_start_mono: int | None = None
         self._persistence_ms = 0
-        self._last_severity: Optional[TriggerSeverity] = None
+        self._last_severity: TriggerSeverity | None = None
 
     def on_request_start(self, now_sec: int) -> None:
         idx = now_sec % WINDOW_BUCKETS
@@ -278,11 +284,15 @@ class InFlightPileupTrigger:
         self._current_in_flight = max(0, self._current_in_flight - 1)
         self._completed[idx] += 1
 
-    def evaluate(self, mode: CaptureMode, now_ms: int, now_sec: int, mono_ms: int) -> Optional[TriggerReason]:
+    def evaluate(
+        self, mode: CaptureMode, now_ms: int, now_sec: int, mono_ms: int
+    ) -> TriggerReason | None:
         started, completed, net_growth, peak_10s = self._collect_window(now_sec)
         _ = started, completed
         threshold = self._threshold()
-        condition_met = self._current_in_flight >= threshold and net_growth >= self._cfg.net_growth_min
+        condition_met = (
+            self._current_in_flight >= threshold and net_growth >= self._cfg.net_growth_min
+        )
 
         if condition_met:
             if self._condition_start_mono is None:
@@ -316,29 +326,31 @@ class InFlightPileupTrigger:
             fired_at_unix_ms=now_ms,
             summary=(
                 "pre-armed due to in-flight pileup: "
-                f"current={self._current_in_flight}, baseline={int(round(self._ewma_peak))}, "
+                f"current={self._current_in_flight}, baseline={round(self._ewma_peak)}, "
                 f"net growth={net_growth} over last 10s"
             ),
             details={
                 "current_in_flight": self._current_in_flight,
                 "peak_in_flight_10s": peak_10s,
                 "net_growth_10s": net_growth,
-                "ewma_peak_in_flight": int(round(self._ewma_peak)),
+                "ewma_peak_in_flight": round(self._ewma_peak),
                 "inflight_threshold": threshold,
                 "persistence_ms": self._persistence_ms,
             },
         )
 
-    def snapshot(self, now_sec: int) -> Dict[str, float | int | None]:
+    def snapshot(self, now_sec: int) -> dict[str, float | int | None]:
         _, _, net_growth, peak_10s = self._collect_window(now_sec)
         threshold = self._threshold()
-        condition_met = self._current_in_flight >= threshold and net_growth >= self._cfg.net_growth_min
+        condition_met = (
+            self._current_in_flight >= threshold and net_growth >= self._cfg.net_growth_min
+        )
         return {
             "severity": self._classify(condition_met, self._persistence_ms),
             "current_in_flight": self._current_in_flight,
             "peak_in_flight_10s": peak_10s,
             "net_growth_10s": net_growth,
-            "ewma_peak_in_flight": int(round(self._ewma_peak)),
+            "ewma_peak_in_flight": round(self._ewma_peak),
             "inflight_threshold": threshold,
             "persistence_ms": self._persistence_ms,
         }
@@ -376,9 +388,12 @@ class InFlightPileupTrigger:
         self._peak[idx] = 0
 
     def _threshold(self) -> int:
-        return max(self._cfg.min_absolute_in_flight, int(round(self._ewma_peak * self._cfg.baseline_multiplier)))
+        return max(
+            self._cfg.min_absolute_in_flight,
+            round(self._ewma_peak * self._cfg.baseline_multiplier),
+        )
 
-    def _classify(self, condition_met: bool, persistence_ms: int) -> Optional[TriggerSeverity]:
+    def _classify(self, condition_met: bool, persistence_ms: int) -> TriggerSeverity | None:
         if not condition_met:
             return None
         persistence_secs = persistence_ms / 1000.0
@@ -394,11 +409,13 @@ class InFlightPileupTrigger:
         if self._ewma_peak <= 0:
             self._ewma_peak = float(peak_in_flight)
             return
-        self._ewma_peak = self._ewma_peak + self._cfg.baseline_alpha * (peak_in_flight - self._ewma_peak)
+        self._ewma_peak = self._ewma_peak + self._cfg.baseline_alpha * (
+            peak_in_flight - self._ewma_peak
+        )
 
 
 class RetryOnsetTrigger:
-    _qualities: List[RetryKeyQuality] = [
+    _qualities: list[RetryKeyQuality] = [
         "explicit",
         "route_template",
         "logical_edge",
@@ -412,10 +429,12 @@ class RetryOnsetTrigger:
         self._retries = [0] * WINDOW_BUCKETS
         self._bucket_sec = [-1] * WINDOW_BUCKETS
 
-        self._quality_buckets: Dict[RetryKeyQuality, List[int]] = {
+        self._quality_buckets: dict[RetryKeyQuality, list[int]] = {
             quality: [0] * WINDOW_BUCKETS for quality in self._qualities
         }
-        self._quality_totals: Dict[RetryKeyQuality, int] = {quality: 0 for quality in self._qualities}
+        self._quality_totals: dict[RetryKeyQuality, int] = {
+            quality: 0 for quality in self._qualities
+        }
 
         table_size = _next_power_of_two(max(128, cfg.table_size))
         self._table_size = table_size
@@ -428,7 +447,7 @@ class RetryOnsetTrigger:
         self._collisions = 0
         self._replacements = 0
         self._occupancy = 0
-        self._last_severity: Optional[TriggerSeverity] = None
+        self._last_severity: TriggerSeverity | None = None
 
     def on_request_complete(self, signal: RequestSignal, now_sec: int, mono_ms: int) -> None:
         if signal.kind != "HTTP_OUT":
@@ -449,7 +468,7 @@ class RetryOnsetTrigger:
         if retry_observed:
             self._retries[idx] += 1
 
-    def evaluate(self, now_ms: int, now_sec: int) -> Optional[TriggerReason]:
+    def evaluate(self, now_ms: int, now_sec: int) -> TriggerReason | None:
         total, retries, rate_bps, fallback_rate, _ = self._collect_window(now_sec)
         current = self._classify(total, retries)
         previous = self._last_severity
@@ -462,7 +481,9 @@ class RetryOnsetTrigger:
         if previous == "severe":
             return None
 
-        threshold = _to_rate_bps(self._cfg.high_rate if current == "severe" else self._cfg.mild_rate)
+        threshold = _to_rate_bps(
+            self._cfg.high_rate if current == "severe" else self._cfg.mild_rate
+        )
         return TriggerReason(
             trigger_type="retry_onset",
             severity=current,
@@ -481,13 +502,15 @@ class RetryOnsetTrigger:
                 "retry_observations_10s": retries,
                 "retry_rate_pct": _bps_to_pct(rate_bps),
                 "retry_normalized_url_fallback_rate_10s": fallback_rate,
-                "retry_table_load_factor": self._occupancy / self._table_size if self._table_size else 0.0,
+                "retry_table_load_factor": self._occupancy / self._table_size
+                if self._table_size
+                else 0.0,
                 "collision_count": self._collisions,
                 "replacement_count": self._replacements,
             },
         )
 
-    def snapshot(self, now_sec: int) -> Dict[str, float | int | None | Dict[str, int]]:
+    def snapshot(self, now_sec: int) -> dict[str, float | int | None | dict[str, int]]:
         total, retries, rate_bps, fallback_rate, quality_10s = self._collect_window(now_sec)
         return {
             "severity": self._classify(total, retries),
@@ -497,7 +520,9 @@ class RetryOnsetTrigger:
             "normalized_url_fallback_rate_10s": fallback_rate,
             "retry_key_quality_10s": quality_10s,
             "retry_key_quality_total": dict(self._quality_totals),
-            "retry_table_load_factor": self._occupancy / self._table_size if self._table_size else 0.0,
+            "retry_table_load_factor": self._occupancy / self._table_size
+            if self._table_size
+            else 0.0,
             "collision_count": self._collisions,
             "replacement_count": self._replacements,
         }
@@ -517,11 +542,13 @@ class RetryOnsetTrigger:
         self._occupancy = 0
         self._last_severity = None
 
-    def _collect_window(self, now_sec: int) -> tuple[int, int, int, float, Dict[RetryKeyQuality, int]]:
+    def _collect_window(
+        self, now_sec: int
+    ) -> tuple[int, int, int, float, dict[RetryKeyQuality, int]]:
         total = 0
         retries = 0
         min_sec = now_sec - (WINDOW_SECONDS - 1)
-        quality: Dict[RetryKeyQuality, int] = {q: 0 for q in self._qualities}
+        quality: dict[RetryKeyQuality, int] = {q: 0 for q in self._qualities}
 
         for i in range(WINDOW_BUCKETS):
             sec = self._bucket_sec[i]
@@ -534,7 +561,7 @@ class RetryOnsetTrigger:
         fallback_rate = quality["normalized_url"] / total if total > 0 else 0.0
         return total, retries, _rate_bps(retries, total), fallback_rate, quality
 
-    def _classify(self, total: int, retries: int) -> Optional[TriggerSeverity]:
+    def _classify(self, total: int, retries: int) -> TriggerSeverity | None:
         if total < self._cfg.min_total_attempts:
             return None
         rate = _rate_bps(retries, total)
@@ -617,7 +644,7 @@ class TriggerEngine:
 
         self._mild_types = [""] * MILD_RING_SIZE
         self._mild_at_ms = [0] * MILD_RING_SIZE
-        self._mild_reasons: List[Optional[TriggerReason]] = [None] * MILD_RING_SIZE
+        self._mild_reasons: list[TriggerReason | None] = [None] * MILD_RING_SIZE
         self._mild_write = 0
 
         self._totals = {
@@ -625,7 +652,7 @@ class TriggerEngine:
             "prearm_trigger_inflight_pileup_total": 0,
             "prearm_trigger_retry_onset_total": 0,
         }
-        self._last_trigger: Optional[TriggerReason] = None
+        self._last_trigger: TriggerReason | None = None
 
     def on_request_start(self, now_sec: int) -> None:
         if self._cfg.enable_in_flight_pileup and not self._disabled["in_flight_pileup"]:
@@ -639,10 +666,14 @@ class TriggerEngine:
             self._safe_run("in_flight_pileup", lambda: self._inflight.on_request_complete(now_sec))
 
         if self._cfg.enable_retry_onset and not self._disabled["retry_onset"]:
-            self._safe_run("retry_onset", lambda: self._retry.on_request_complete(signal, now_sec, mono_ms))
+            self._safe_run(
+                "retry_onset", lambda: self._retry.on_request_complete(signal, now_sec, mono_ms)
+            )
 
-    def evaluate(self, mode: CaptureMode, now_ms: int, now_sec: int, mono_ms: int) -> Optional[TriggerDecision]:
-        severe: List[TriggerReason] = []
+    def evaluate(
+        self, mode: CaptureMode, now_ms: int, now_sec: int, mono_ms: int
+    ) -> TriggerDecision | None:
+        severe: list[TriggerReason] = []
 
         def on_fire(reason: TriggerReason) -> None:
             self._last_trigger = reason
@@ -664,16 +695,24 @@ class TriggerEngine:
             self._mild_write = (self._mild_write + 1) % MILD_RING_SIZE
 
         if self._cfg.enable_slow_success and not self._disabled["slow_success"]:
-            self._safe_run("slow_success", lambda: self._fire_if(self._slow.evaluate(now_ms, now_sec), on_fire))
+            self._safe_run(
+                "slow_success",
+                lambda: self._fire_if(self._slow.evaluate(now_ms, now_sec), on_fire),
+            )
 
         if self._cfg.enable_in_flight_pileup and not self._disabled["in_flight_pileup"]:
             self._safe_run(
                 "in_flight_pileup",
-                lambda: self._fire_if(self._inflight.evaluate(mode, now_ms, now_sec, mono_ms), on_fire),
+                lambda: self._fire_if(
+                    self._inflight.evaluate(mode, now_ms, now_sec, mono_ms), on_fire
+                ),
             )
 
         if self._cfg.enable_retry_onset and not self._disabled["retry_onset"]:
-            self._safe_run("retry_onset", lambda: self._fire_if(self._retry.evaluate(now_ms, now_sec), on_fire))
+            self._safe_run(
+                "retry_onset",
+                lambda: self._fire_if(self._retry.evaluate(now_ms, now_sec), on_fire),
+            )
 
         if severe:
             return TriggerDecision(should_enter_prearm=True, reasons=severe)
@@ -701,7 +740,11 @@ class TriggerEngine:
         self._inflight.reset()
         self._retry.reset()
         self._disabled = {"slow_success": False, "in_flight_pileup": False, "retry_onset": False}
-        self._disabled_logged = {"slow_success": False, "in_flight_pileup": False, "retry_onset": False}
+        self._disabled_logged = {
+            "slow_success": False,
+            "in_flight_pileup": False,
+            "retry_onset": False,
+        }
         self._mild_types = [""] * MILD_RING_SIZE
         self._mild_at_ms = [0] * MILD_RING_SIZE
         self._mild_reasons = [None] * MILD_RING_SIZE
@@ -714,12 +757,12 @@ class TriggerEngine:
         self._last_trigger = None
 
     @staticmethod
-    def _fire_if(reason: Optional[TriggerReason], sink) -> None:
+    def _fire_if(reason: TriggerReason | None, sink) -> None:
         if reason is not None:
             sink(reason)
 
-    def _collect_distinct_mild(self, mono_ms: int) -> List[TriggerReason]:
-        latest: Dict[TriggerType, tuple[int, TriggerReason]] = {}
+    def _collect_distinct_mild(self, mono_ms: int) -> list[TriggerReason]:
+        latest: dict[TriggerType, tuple[int, TriggerReason]] = {}
         for i in range(MILD_RING_SIZE):
             trigger_type = self._mild_types[i]
             if not trigger_type:
@@ -739,7 +782,9 @@ class TriggerEngine:
 
         return [item[1] for item in latest.values()]
 
-    def _safe_run(self, trigger: Literal["slow_success", "in_flight_pileup", "retry_onset"], fn) -> None:
+    def _safe_run(
+        self, trigger: Literal["slow_success", "in_flight_pileup", "retry_onset"], fn
+    ) -> None:
         try:
             fn()
         except Exception as exc:
@@ -752,4 +797,4 @@ class TriggerEngine:
 def _next_power_of_two(value: int) -> int:
     if value <= 1:
         return 1
-    return 1 << (int(math.ceil(math.log2(value))))
+    return 1 << (math.ceil(math.log2(value)))

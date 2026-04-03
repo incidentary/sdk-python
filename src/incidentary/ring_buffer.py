@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import List, Optional
 
 from .types import SkeletonCe
 
@@ -18,7 +17,7 @@ class RingBuffer:
     def __init__(self, capacity: int = 4_000, window_ms: int = 60_000):
         self._capacity = capacity
         self._window_ms = window_ms
-        self._slots: List[Optional[SkeletonCe]] = [None] * capacity
+        self._slots: list[SkeletonCe | None] = [None] * capacity
         self._head = 0
         self._count = 0
         self._lock = threading.Lock()
@@ -30,13 +29,13 @@ class RingBuffer:
             if self._count < self._capacity:
                 self._count += 1
 
-    def flush(self, window_ms: Optional[int] = None) -> List[SkeletonCe]:
+    def flush(self, window_ms: int | None = None) -> list[SkeletonCe]:
         with self._lock:
             w = window_ms if window_ms is not None else self._window_ms
             cutoff_ns = (int(time.time() * 1000) - w) * 1_000_000
 
             n = min(self._count, self._capacity)
-            result: List[SkeletonCe] = []
+            result: list[SkeletonCe] = []
             for i in range(n):
                 idx = (self._head - n + i + self._capacity) % self._capacity
                 slot = self._slots[idx]

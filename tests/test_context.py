@@ -39,7 +39,7 @@ def test_trace_context_is_frozen():
     assert ctx.ce_id == "c"
     try:
         ctx.trace_id = "changed"  # type: ignore[misc]
-        assert False, "Should have raised FrozenInstanceError"
+        raise AssertionError("Should have raised FrozenInstanceError")
     except AttributeError:
         pass
 

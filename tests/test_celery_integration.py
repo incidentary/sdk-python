@@ -7,10 +7,7 @@ in the test environment.
 from __future__ import annotations
 
 import sys
-from unittest.mock import MagicMock, call, patch
-
-import pytest
-
+from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -111,7 +108,9 @@ class TestCeleryIsPatched:
 
     def test_is_patched_true_after_patch(self):
         fake_celery = _build_fake_celery()
-        with patch.dict(sys.modules, {"celery": fake_celery, "celery.signals": fake_celery.signals}):
+        with patch.dict(
+            sys.modules, {"celery": fake_celery, "celery.signals": fake_celery.signals}
+        ):
             from incidentary.integrations import celery as celery_mod
 
             importlib_reload_integration(celery_mod)
@@ -124,7 +123,9 @@ class TestCeleryIsPatched:
 
     def test_is_patched_false_after_unpatch(self):
         fake_celery = _build_fake_celery()
-        with patch.dict(sys.modules, {"celery": fake_celery, "celery.signals": fake_celery.signals}):
+        with patch.dict(
+            sys.modules, {"celery": fake_celery, "celery.signals": fake_celery.signals}
+        ):
             from incidentary.integrations.celery import CeleryIntegration
 
             integration = CeleryIntegration()
@@ -277,7 +278,11 @@ class TestCeleryPublishHandler:
 
             # Grab the handler that was connected to before_task_publish
             connect_call = fake_celery.signals.before_task_publish.connect.call_args
-            handler = connect_call[0][0] if connect_call[0] else connect_call[1].get("receiver") or connect_call[0][0]
+            handler = (
+                connect_call[0][0]
+                if connect_call[0]
+                else connect_call[1].get("receiver") or connect_call[0][0]
+            )
 
             set_trace_context("trace-pub-1", "ce-pub-1")
             headers = {}
@@ -388,7 +393,10 @@ class TestCeleryConsumeHandlers:
             clear_trace_context()
 
             task = MagicMock()
-            task.request = {"_incidentary_trace_id": "t-consume", "_incidentary_ce_id": "c-consume"}
+            task.request = {
+                "_incidentary_trace_id": "t-consume",
+                "_incidentary_ce_id": "c-consume",
+            }
 
             prerun(sender="task_name", task_id="tid-1", task=task)
 
@@ -442,7 +450,9 @@ class TestCeleryConsumeHandlers:
             prerun(sender="task_name", task_id="tid-3", task=task)
 
             try:
-                postrun(sender="task_name", task_id="tid-3", task=task, retval=None, state="SUCCESS")
+                postrun(
+                    sender="task_name", task_id="tid-3", task=task, retval=None, state="SUCCESS"
+                )
             finally:
                 clear_trace_context()
 
@@ -459,7 +469,10 @@ class TestCeleryConsumeHandlers:
             sys.modules,
             {"celery": fake_celery, "celery.signals": fake_celery.signals},
         ):
-            from incidentary.context import clear_trace_context, get_trace_context, set_trace_context
+            from incidentary.context import (
+                get_trace_context,
+                set_trace_context,
+            )
             from incidentary.integrations.celery import CeleryIntegration
 
             integration = CeleryIntegration()

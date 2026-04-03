@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
-from typing import Any, Dict, Literal, Optional
+from enum import StrEnum
+from typing import Any, Literal
 
 RetryKeyQuality = Literal[
     "explicit",
@@ -14,9 +14,7 @@ RetryKeyQuality = Literal[
     "unknown",
 ]
 
-PreArmTriggerType = Literal[
-    "slow_success", "in_flight_pileup", "retry_onset", "error_rate_5xx"
-]
+PreArmTriggerType = Literal["slow_success", "in_flight_pileup", "retry_onset", "error_rate_5xx"]
 PreArmTriggerSeverity = Literal["mild", "severe"]
 RequestKind = Literal["HTTP_IN", "HTTP_OUT"]
 IncidentaryEventType = Literal[
@@ -36,13 +34,13 @@ IncidentaryEventType = Literal[
 IncidentaryEventClass = Literal["causal", "context"]
 
 
-class CaptureMode(str, Enum):
+class CaptureMode(StrEnum):
     NORMAL = "NORMAL"
     PRE_ARMED = "PRE_ARMED"
     INCIDENT = "INCIDENT"
 
 
-class CeKind(str, Enum):
+class CeKind(StrEnum):
     HTTP_IN = "HTTP_IN"
     HTTP_OUT = "HTTP_OUT"
     QUEUE_PUBLISH = "QUEUE_PUBLISH"
@@ -56,36 +54,36 @@ PARENT_CE_HEADER = "x-incidentary-parent-ce"
 
 @dataclass
 class CeDetail:
-    method: Optional[str] = None
-    route_key: Optional[str] = None
-    route_template: Optional[str] = None
-    request_bytes: Optional[int] = None
-    response_bytes: Optional[int] = None
-    request_headers: Optional[Dict[str, str]] = None
-    response_headers: Optional[Dict[str, str]] = None
-    retry: Optional[Dict[str, object]] = None
-    downstream: Optional[Dict[str, object]] = None
-    local_error_classification: Optional[Literal["none", "timeout", "cancelled"]] = None
-    payload_snippet: Optional[str] = None
+    method: str | None = None
+    route_key: str | None = None
+    route_template: str | None = None
+    request_bytes: int | None = None
+    response_bytes: int | None = None
+    request_headers: dict[str, str] | None = None
+    response_headers: dict[str, str] | None = None
+    retry: dict[str, object] | None = None
+    downstream: dict[str, object] | None = None
+    local_error_classification: Literal["none", "timeout", "cancelled"] | None = None
+    payload_snippet: str | None = None
 
 
 @dataclass
 class SkeletonCe:
     ce_id: str
     trace_id: str
-    parent_ce_id: Optional[str]
+    parent_ce_id: str | None
     service_id: str
     wall_ts_ns: int
     kind: str
     status: int
     duration_ns: int
     sdk_version: str = "0.2.0"
-    captured_before_alert: Optional[bool] = None
-    ring_buffer_seq: Optional[int] = None
-    event_type: Optional[IncidentaryEventType] = None
-    event_class: Optional[IncidentaryEventClass] = None
-    event_attrs: Optional[Dict[str, Any]] = None
-    detail: Optional[CeDetail] = None
+    captured_before_alert: bool | None = None
+    ring_buffer_seq: int | None = None
+    event_type: IncidentaryEventType | None = None
+    event_class: IncidentaryEventClass | None = None
+    event_attrs: dict[str, Any] | None = None
+    detail: CeDetail | None = None
 
 
 @dataclass(frozen=True)
@@ -96,17 +94,17 @@ class RecordRequestOptions:
     timed_out: bool = False
     outbound_retry_key_hash: int = 0
     outbound_retry_key_quality: RetryKeyQuality = "unknown"
-    explicit_retry_observed: Optional[bool] = None
+    explicit_retry_observed: bool | None = None
 
 
 @dataclass(frozen=True)
 class RecordEventOptions:
-    trace_id: Optional[str] = None
-    parent_ce_id: Optional[str] = None
-    status: Optional[int] = None
+    trace_id: str | None = None
+    parent_ce_id: str | None = None
+    status: int | None = None
     duration_ns: int = 0
-    wall_ts_ns: Optional[int] = None
-    event_attrs: Optional[Dict[str, Any]] = None
+    wall_ts_ns: int | None = None
+    event_attrs: dict[str, Any] | None = None
 
 
 @dataclass
@@ -119,7 +117,7 @@ class PreArmTriggerReason:
     threshold_label: str
     fired_at_unix_ms: int
     summary: str
-    details: Dict[str, float | int | str]
+    details: dict[str, float | int | str]
 
 
 @dataclass
@@ -128,10 +126,8 @@ class PreArmWindow:
     started_at_ms: int
     expires_at_ms: int
     reasons: list[PreArmTriggerReason]
-    bound_incident_id: Optional[str]
-    closed_at_ms: Optional[int]
-    close_reason: Optional[
-        Literal[
-            "ttl", "error_rate_recovered", "incident_close", "manual", "state_reset"
-        ]
-    ]
+    bound_incident_id: str | None
+    closed_at_ms: int | None
+    close_reason: (
+        Literal["ttl", "error_rate_recovered", "incident_close", "manual", "state_reset"] | None
+    )

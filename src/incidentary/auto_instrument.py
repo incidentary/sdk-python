@@ -51,7 +51,8 @@ def undo_patches() -> None:
 
     if "requests_session_send" in _originals:
         try:
-            import requests  # noqa: F811
+            import requests
+
             requests.Session.send = _originals["requests_session_send"]
         except Exception:
             pass
@@ -69,6 +70,7 @@ def is_patched() -> bool:
 # ---------------------------------------------------------------------------
 # urllib patching
 # ---------------------------------------------------------------------------
+
 
 def _patch_urllib() -> None:
     """Monkey-patch ``urllib.request.urlopen`` to inject trace headers."""
@@ -118,13 +120,14 @@ def _patch_urllib() -> None:
 # requests patching
 # ---------------------------------------------------------------------------
 
+
 def _patch_requests() -> None:
     """Monkey-patch ``requests.Session.send`` to inject trace headers.
 
     Gracefully skips if the ``requests`` library is not installed.
     """
     try:
-        import requests  # noqa: F811
+        import requests
     except Exception:
         return
 
@@ -161,6 +164,7 @@ def _patch_requests() -> None:
 # ---------------------------------------------------------------------------
 # Event recording helper
 # ---------------------------------------------------------------------------
+
 
 def _record_http_out(start_ns: int, status_code: int) -> None:
     """Record an HTTP_OUT event on the client. Never throws."""

@@ -13,8 +13,8 @@ import time
 import urllib.error
 import urllib.request
 import warnings
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, is_dataclass
-from typing import Callable, Iterable, Optional
 
 from .types import SkeletonCe
 
@@ -34,7 +34,7 @@ class Transport:
         environment: str = "production",
         workspace_id: str = "",
         timeout_ms: int = 5000,
-        on_error: Optional[Callable[[Exception], None]] = None,
+        on_error: Callable[[Exception], None] | None = None,
         circuit_breaker_cooldown_ms: int = 60_000,
     ):
         self.base_url = (base_url or api_url or "").strip().rstrip("/")
@@ -65,10 +65,7 @@ class Transport:
             and int(time.time() * 1000) < self._quota_pause_until_ms
         ):
             return False
-        return (
-            self._backend_healthy
-            or int(time.time() * 1000) >= self._circuit_open_until_ms
-        )
+        return self._backend_healthy or int(time.time() * 1000) >= self._circuit_open_until_ms
 
     def upload_batch(
         self,
@@ -85,8 +82,7 @@ class Transport:
                 "flushed_at": int(time.time() * 1_000_000_000),
                 "capture_mode": capture_mode,
                 "events": [
-                    asdict(event) if is_dataclass(event) else event.__dict__
-                    for event in events
+                    asdict(event) if is_dataclass(event) else event.__dict__ for event in events
                 ],
                 "sdk_telemetry": {
                     "sdk_version": SDK_VERSION,
@@ -109,9 +105,7 @@ class Transport:
         )
         thread.start()
 
-    def notify_backend(
-        self, event: str, service_id: str, metadata: dict | None = None
-    ) -> None:
+    def notify_backend(self, event: str, service_id: str, metadata: dict | None = None) -> None:
         if not self._can_attempt_request():
             return
 
@@ -125,9 +119,7 @@ class Transport:
         except Exception:
             return
 
-        thread = threading.Thread(
-            target=self._do_notify_backend, args=(body,), daemon=True
-        )
+        thread = threading.Thread(target=self._do_notify_backend, args=(body,), daemon=True)
         thread.start()
 
     def _do_upload(self, body: bytes, incident_id: str | None) -> None:
@@ -152,9 +144,7 @@ class Transport:
         delays = [1, 4, 16]
         for attempt in range(len(delays) + 1):
             try:
-                with urllib.request.urlopen(
-                    req, timeout=self.timeout_ms / 1000
-                ) as response:
+                with urllib.request.urlopen(req, timeout=self.timeout_ms / 1000) as response:
                     if 200 <= response.status < 300:
                         self._on_success()
                         return
@@ -169,9 +159,7 @@ class Transport:
                         json.dumps(
                             {
                                 "event": "incidentary_sdk_version_rejected",
-                                "code": data.get("error", {}).get(
-                                    "code", "SDK_VERSION_TOO_OLD"
-                                ),
+                                "code": data.get("error", {}).get("code", "SDK_VERSION_TOO_OLD"),
                                 "minimum_version": data.get("error", {}).get(
                                     "minimum_version", "unknown"
                                 ),
@@ -216,9 +204,7 @@ class Transport:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(
-                req, timeout=self.timeout_ms / 1000
-            ) as response:
+            with urllib.request.urlopen(req, timeout=self.timeout_ms / 1000) as response:
                 if 200 <= response.status < 300:
                     self._on_success()
                     return
@@ -233,15 +219,9 @@ class Transport:
             return False
 
         with self._lock:
-            if (
-                self._quota_pause_until_ms != 0
-                and now_ms < self._quota_pause_until_ms
-            ):
+            if self._quota_pause_until_ms != 0 and now_ms < self._quota_pause_until_ms:
                 return False
-            if (
-                self._quota_pause_until_ms != 0
-                and now_ms >= self._quota_pause_until_ms
-            ):
+            if self._quota_pause_until_ms != 0 and now_ms >= self._quota_pause_until_ms:
                 self._quota_pause_until_ms = 0
             if self._backend_healthy:
                 return True

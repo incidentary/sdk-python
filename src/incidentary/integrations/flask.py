@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from .base import Integration
 
@@ -28,7 +28,7 @@ class FlaskIntegration(Integration):
     def __init__(self) -> None:
         self._patched = False
         self._original_init: Any = None
-        self._client: Optional[IncidentaryClient] = None
+        self._client: IncidentaryClient | None = None
 
     @property
     def name(self) -> str:
@@ -37,7 +37,7 @@ class FlaskIntegration(Integration):
     def detect(self) -> bool:
         return importlib.util.find_spec("flask") is not None
 
-    def patch(self, client: "IncidentaryClient") -> None:
+    def patch(self, client: IncidentaryClient) -> None:
         if self._patched:
             return
         try:

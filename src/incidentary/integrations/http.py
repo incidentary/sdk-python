@@ -31,7 +31,7 @@ class HTTPIntegration(Integration):
         """urllib is part of the stdlib — always available."""
         return True
 
-    def patch(self, client: "IncidentaryClient") -> None:
+    def patch(self, client: IncidentaryClient) -> None:
         from ..auto_instrument import auto_instrument as _auto_instrument
 
         _auto_instrument(client)

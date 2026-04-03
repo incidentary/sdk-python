@@ -62,9 +62,7 @@ def test_enters_pre_armed_on_error_spike_with_reason_metadata():
 
     debug = client.get_prearm_debug_state()
     assert debug["active_prearm_window"] is not None
-    assert (
-        debug["active_prearm_window"]["reasons"][0]["trigger_type"] == "error_rate_5xx"
-    )
+    assert debug["active_prearm_window"]["reasons"][0]["trigger_type"] == "error_rate_5xx"
 
 
 def test_incident_transitions_preserve_bind_metadata():
@@ -94,9 +92,7 @@ def test_prearmed_expires_silently_without_bind():
         client.record_request(500)
     assert client.get_capture_mode() == CaptureMode.PRE_ARMED
 
-    assert wait_until(
-        lambda: client.get_capture_mode() == CaptureMode.NORMAL, timeout_s=0.35
-    )
+    assert wait_until(lambda: client.get_capture_mode() == CaptureMode.NORMAL, timeout_s=0.35)
 
     debug = client.get_prearm_debug_state()
     assert debug["counters"]["prearm_expire_total"] >= 1
@@ -170,9 +166,7 @@ def test_record_event_wrappers_emit_queue_job_webhook_vocabulary():
     client.record_job_end()
     client.record_webhook_in()
     client.record_webhook_out(
-        RecordEventOptions(
-            status=202, event_attrs={"endpoint": "payments"}, wall_ts_ns=now_ns + 5
-        )
+        RecordEventOptions(status=202, event_attrs={"endpoint": "payments"}, wall_ts_ns=now_ns + 5)
     )
 
     events = client._buffer.flush(window_ms=60_000)  # type: ignore[attr-defined]
@@ -297,3 +291,345 @@ def test_sharded_counter_concurrent_add_and_drain():
         drained_total += drained
 
     assert drained_total == expected_total
+
+
+# ---------------------------------------------------------------------------
+# _normalize_request_options
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeRequestOptions:
+    def test_none_returns_defaults(self):
+        from incidentary.types import RecordRequestOptions
+
+        result = IncidentaryClient._normalize_request_options(None)
+        assert isinstance(result, RecordRequestOptions)
+        assert result.kind == "HTTP_IN"
+        assert result.duration_ns == 0
+
+    def test_passthrough_record_request_options(self):
+        from incidentary.types import RecordRequestOptions
+
+        opts = RecordRequestOptions(kind="HTTP_OUT", duration_ns=42)
+        result = IncidentaryClient._normalize_request_options(opts)
+        assert result is opts
+
+    def test_dict_with_snake_case(self):
+        result = IncidentaryClient._normalize_request_options(
+            {
+                "kind": "HTTP_OUT",
+                "duration_ns": 1000,
+                "cancelled": True,
+                "timed_out": True,
+                "outbound_retry_key_hash": 12345,
+                "outbound_retry_key_quality": "route_template",
+                "explicit_retry_observed": True,
+            }
+        )
+        assert result.kind == "HTTP_OUT"
+        assert result.duration_ns == 1000
+        assert result.cancelled is True
+        assert result.timed_out is True
+        assert result.outbound_retry_key_hash == 12345
+        assert result.outbound_retry_key_quality == "route_template"
+        assert result.explicit_retry_observed is True
+
+    def test_dict_with_camel_case_fallbacks(self):
+        result = IncidentaryClient._normalize_request_options(
+            {
+                "timedOut": True,
+                "outboundRetryKeyHash": 99,
+                "outboundRetryKeyQuality": "explicit",
+                "explicitRetryObserved": False,
+            }
+        )
+        assert result.timed_out is True
+        assert result.outbound_retry_key_hash == 99
+        assert result.outbound_retry_key_quality == "explicit"
+        assert result.explicit_retry_observed is False
+
+    def test_unsupported_type_returns_defaults(self):
+        from incidentary.types import RecordRequestOptions
+
+        result = IncidentaryClient._normalize_request_options("bad")
+        assert isinstance(result, RecordRequestOptions)
+
+
+# ---------------------------------------------------------------------------
+# _detail_has_content
+# ---------------------------------------------------------------------------
+
+
+class TestDetailHasContent:
+    def test_empty_detail_returns_false(self):
+        detail = CeDetail()
+        assert IncidentaryClient._detail_has_content(detail) is False
+
+    def test_detail_with_method_returns_true(self):
+        detail = CeDetail(method="GET")
+        assert IncidentaryClient._detail_has_content(detail) is True
+
+    def test_detail_with_empty_string_returns_false(self):
+        detail = CeDetail(method="")
+        assert IncidentaryClient._detail_has_content(detail) is False
+
+    def test_detail_with_empty_dict_returns_false(self):
+        detail = CeDetail(request_headers={})
+        assert IncidentaryClient._detail_has_content(detail) is False
+
+    def test_detail_with_populated_dict_returns_true(self):
+        detail = CeDetail(request_headers={"content-type": "application/json"})
+        assert IncidentaryClient._detail_has_content(detail) is True
+
+
+# ---------------------------------------------------------------------------
+# _normalize_payload_snippet / _redact_json_string
+# ---------------------------------------------------------------------------
+
+
+class TestPayloadRedaction:
+    def test_truncation_to_max_bytes(self):
+        client = make_client(
+            pre_arm_detail_capture_payload_enabled=True,
+            pre_arm_detail_max_payload_bytes=10,
+        )
+        result = client._normalize_payload_snippet("a" * 100)
+        assert len(result.encode("utf-8")) <= 10
+
+    def test_zero_max_bytes_returns_none(self):
+        client = make_client(
+            pre_arm_detail_capture_payload_enabled=True,
+            pre_arm_detail_max_payload_bytes=0,
+        )
+        assert client._normalize_payload_snippet("anything") is None
+
+    def test_short_payload_not_truncated(self):
+        client = make_client(
+            pre_arm_detail_capture_payload_enabled=True,
+            pre_arm_detail_max_payload_bytes=1000,
+        )
+        result = client._normalize_payload_snippet("short")
+        assert result == "short"
+
+    def test_redact_json_replaces_sensitive_fields(self):
+        client = make_client(redact_fields=["password", "token"])
+        result = client._redact_json_string('{"password":"secret","name":"ok","token":"abc"}')
+        parsed = __import__("json").loads(result)
+        assert parsed["password"] == "<redacted>"
+        assert parsed["token"] == "<redacted>"
+        assert parsed["name"] == "ok"
+
+    def test_redact_json_handles_nested(self):
+        client = make_client(redact_fields=["secret"])
+        result = client._redact_json_string('{"outer":{"secret":"val"},"items":[{"secret":"x"}]}')
+        parsed = __import__("json").loads(result)
+        assert parsed["outer"]["secret"] == "<redacted>"
+        assert parsed["items"][0]["secret"] == "<redacted>"
+
+    def test_redact_json_no_fields_passthrough(self):
+        client = make_client(redact_fields=[])
+        raw = '{"password":"secret"}'
+        assert client._redact_json_string(raw) == raw
+
+    def test_redact_json_invalid_json_passthrough(self):
+        client = make_client(redact_fields=["password"])
+        raw = "not json at all"
+        assert client._redact_json_string(raw) == raw
+
+
+# ---------------------------------------------------------------------------
+# escalate_to_incident edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestEscalateToIncident:
+    def test_escalate_without_prior_prearm(self):
+        client = make_client()
+        client.escalate_to_incident("inc_1")
+        assert client.get_capture_mode() == CaptureMode.INCIDENT
+
+    def test_escalate_twice_preserves_incident(self):
+        client = make_client()
+        client.escalate_to_incident("inc_1")
+        client.escalate_to_incident("inc_2")
+        assert client.get_capture_mode() == CaptureMode.INCIDENT
+
+    def test_close_incident_returns_to_normal(self):
+        client = make_client()
+        client.escalate_to_incident("inc_1")
+        client.close_incident()
+        assert client.get_capture_mode() == CaptureMode.NORMAL
+
+    def test_close_incident_without_escalate(self):
+        client = make_client()
+        client.close_incident()  # should not raise
+        assert client.get_capture_mode() == CaptureMode.NORMAL
+
+
+# ---------------------------------------------------------------------------
+# Event type mapping
+# ---------------------------------------------------------------------------
+
+
+class TestEventTypeMapping:
+    def test_http_in_kind(self):
+        client = make_client()
+        assert client._event_type_to_kind("http_in") == "HTTP_IN"
+        assert client._event_type_to_kind("webhook_in") == "HTTP_IN"
+
+    def test_http_out_kind(self):
+        client = make_client()
+        assert client._event_type_to_kind("http_out") == "HTTP_OUT"
+        assert client._event_type_to_kind("webhook_out") == "HTTP_OUT"
+
+    def test_queue_kinds(self):
+        client = make_client()
+        assert client._event_type_to_kind("queue_publish") == "QUEUE_PUBLISH"
+        assert client._event_type_to_kind("queue_consume") == "QUEUE_CONSUME"
+
+    def test_internal_kind_for_unknown(self):
+        client = make_client()
+        assert client._event_type_to_kind("job_start") == "INTERNAL"
+        assert client._event_type_to_kind("custom_event") == "INTERNAL"
+
+    def test_default_status_for_http_types(self):
+        client = make_client()
+        assert client._event_type_default_status("http_in") == 200
+        assert client._event_type_default_status("webhook_out") == 200
+
+    def test_default_status_for_non_http_types(self):
+        client = make_client()
+        assert client._event_type_default_status("queue_publish") == 0
+        assert client._event_type_default_status("job_start") == 0
+
+
+# ---------------------------------------------------------------------------
+# record_event with various inputs
+# ---------------------------------------------------------------------------
+
+
+class TestRecordEvent:
+    def test_record_event_with_defaults(self):
+        client = make_client()
+        client.record_event("http_in")
+        events = client._buffer.flush()
+        assert len(events) == 1
+        assert events[0].event_type == "http_in"
+        assert events[0].kind == "HTTP_IN"
+
+    def test_record_event_with_options(self):
+        client = make_client()
+        client.record_event(
+            "http_out",
+            RecordEventOptions(
+                trace_id="trace-1",
+                parent_ce_id="parent-1",
+                status=404,
+                duration_ns=5000,
+            ),
+        )
+        events = client._buffer.flush()
+        assert len(events) == 1
+        assert events[0].status == 404
+        assert events[0].trace_id == "trace-1"
+        assert events[0].duration_ns == 5000
+
+    def test_record_event_negative_duration_clamped(self):
+        client = make_client()
+        client.record_event("http_in", RecordEventOptions(duration_ns=-100))
+        events = client._buffer.flush()
+        assert events[0].duration_ns == 0
+
+
+# ---------------------------------------------------------------------------
+# attach_detail_to_event edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestAttachDetail:
+    def test_no_detail_in_normal_mode(self):
+        client = make_client()
+        ce = make_ce()
+        result = client.attach_detail_to_event(ce, CeDetail(method="GET", route_key="/test"))
+        assert result.detail is None
+
+    def test_none_detail_returns_ce_unchanged(self):
+        client = make_client()
+        # Force pre-armed mode
+        for _ in range(8):
+            client.record_request(200)
+        for _ in range(2):
+            client.record_request(500)
+        ce = make_ce()
+        result = client.attach_detail_to_event(ce, None)
+        assert result.detail is None
+
+    def test_payload_disabled_strips_snippet(self):
+        client = make_client(
+            pre_arm_detail_capture_payload_enabled=False,
+        )
+        # Enter pre-armed mode
+        for _ in range(8):
+            client.record_request(200)
+        for _ in range(2):
+            client.record_request(500)
+
+        ce = make_ce()
+        result = client.attach_detail_to_event(
+            ce, CeDetail(method="POST", route_key="/api", payload_snippet='{"data":"val"}')
+        )
+        assert result.detail is not None
+        assert result.detail.payload_snippet is None
+
+
+# ---------------------------------------------------------------------------
+# get_prearm_debug_state
+# ---------------------------------------------------------------------------
+
+
+class TestPreamDebugState:
+    def test_debug_state_in_normal_mode(self):
+        client = make_client()
+        state = client.get_prearm_debug_state()
+        assert state["gauges"]["current_prearm_state"] == "NORMAL"
+        assert state["active_prearm_window"] is None
+
+    def test_debug_state_in_prearmed_mode(self):
+        client = make_client()
+        for _ in range(8):
+            client.record_request(200)
+        for _ in range(2):
+            client.record_request(500)
+
+        state = client.get_prearm_debug_state()
+        assert state["gauges"]["current_prearm_state"] == "PRE_ARMED"
+        assert state["active_prearm_window"] is not None
+        assert state["counters"]["prearm_enter_total"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# Cooldown behavior
+# ---------------------------------------------------------------------------
+
+
+class TestCooldown:
+    def test_cooldown_prevents_immediate_reenter(self):
+        client = make_client(
+            pre_arm_cooldown_ms=60_000, pre_arm_ttl_ms=50, pre_arm_min_duration_ms=0
+        )
+        # Enter pre-armed
+        for _ in range(8):
+            client.record_request(200)
+        for _ in range(2):
+            client.record_request(500)
+        assert client.get_capture_mode() == CaptureMode.PRE_ARMED
+
+        # Wait for TTL to expire
+        assert wait_until(lambda: client.get_capture_mode() == CaptureMode.NORMAL, timeout_s=0.5)
+
+        # Try to re-enter — cooldown should prevent it
+        for _ in range(8):
+            client.record_request(200)
+        for _ in range(2):
+            client.record_request(500)
+        assert client.get_capture_mode() == CaptureMode.NORMAL

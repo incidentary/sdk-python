@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from .base import Integration
 from .psycopg2_integration import _safe_statement
@@ -28,7 +28,7 @@ class AsyncpgIntegration(Integration):
 
     def __init__(self) -> None:
         self._patched = False
-        self._client: Optional[IncidentaryClient] = None
+        self._client: IncidentaryClient | None = None
         self._originals: dict[str, Any] = {}
 
     @property
@@ -38,7 +38,7 @@ class AsyncpgIntegration(Integration):
     def detect(self) -> bool:
         return importlib.util.find_spec("asyncpg") is not None
 
-    def patch(self, client: "IncidentaryClient") -> None:
+    def patch(self, client: IncidentaryClient) -> None:
         if self._patched:
             return
         try:

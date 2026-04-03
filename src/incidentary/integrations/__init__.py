@@ -37,17 +37,17 @@ def default_integrations() -> list[Integration]:
 
 
 __all__ = [
-    "Integration",
-    "HTTPIntegration",
-    "CeleryIntegration",
-    "KombuIntegration",
-    "HttpxIntegration",
     "AiohttpIntegration",
+    "AsyncpgIntegration",
+    "CeleryIntegration",
     "DjangoIntegration",
     "FlaskIntegration",
-    "Psycopg2Integration",
-    "AsyncpgIntegration",
     "GrpcIntegration",
+    "HTTPIntegration",
+    "HttpxIntegration",
+    "Integration",
     "IntegrationRegistry",
+    "KombuIntegration",
+    "Psycopg2Integration",
     "default_integrations",
 ]

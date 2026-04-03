@@ -38,7 +38,7 @@ class HttpxIntegration(Integration):
     def detect(self) -> bool:
         return importlib.util.find_spec("httpx") is not None
 
-    def patch(self, client: "IncidentaryClient") -> None:
+    def patch(self, client: IncidentaryClient) -> None:
         if self._patched:
             return
         try:
@@ -51,7 +51,7 @@ class HttpxIntegration(Integration):
         except Exception:
             logger.debug("Failed to patch httpx transports", exc_info=True)
 
-    def _patch_sync(self, httpx: Any, client: "IncidentaryClient") -> None:
+    def _patch_sync(self, httpx: Any, client: IncidentaryClient) -> None:
         original = httpx.HTTPTransport.handle_request
 
         if hasattr(original, "__otel_original"):
@@ -104,7 +104,7 @@ class HttpxIntegration(Integration):
 
         httpx.HTTPTransport.handle_request = _patched_handle_request
 
-    def _patch_async(self, httpx: Any, client: "IncidentaryClient") -> None:
+    def _patch_async(self, httpx: Any, client: IncidentaryClient) -> None:
         original = httpx.AsyncHTTPTransport.handle_async_request
 
         if hasattr(original, "__otel_original"):
@@ -166,9 +166,7 @@ class HttpxIntegration(Integration):
             if self._original_handle_request is not None:
                 httpx.HTTPTransport.handle_request = self._original_handle_request
             if self._original_handle_async_request is not None:
-                httpx.AsyncHTTPTransport.handle_async_request = (
-                    self._original_handle_async_request
-                )
+                httpx.AsyncHTTPTransport.handle_async_request = self._original_handle_async_request
         except Exception:
             logger.debug("Failed to restore httpx transport methods", exc_info=True)
         finally:

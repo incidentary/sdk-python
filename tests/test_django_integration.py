@@ -10,7 +10,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -93,7 +92,7 @@ class TestDjangoIsPatched:
         assert DjangoIntegration().is_patched() is False
 
     def test_is_patched_true_after_patch(self):
-        django_mod, settings = _build_fake_django()
+        django_mod, _settings = _build_fake_django()
         with patch.dict(sys.modules, {"django": django_mod, "django.conf": django_mod.conf}):
             from incidentary.integrations.django import DjangoIntegration
 
@@ -103,7 +102,7 @@ class TestDjangoIsPatched:
             assert integration.is_patched() is True
 
     def test_is_patched_false_after_unpatch(self):
-        django_mod, settings = _build_fake_django()
+        django_mod, _settings = _build_fake_django()
         with patch.dict(sys.modules, {"django": django_mod, "django.conf": django_mod.conf}):
             from incidentary.integrations.django import DjangoIntegration
 
@@ -129,7 +128,9 @@ class TestDjangoPatch:
             client = _make_stub_client()
             integration.patch(client)
 
-        assert settings.MIDDLEWARE[0] == "incidentary.integrations.django.IncidentaryDjangoMiddleware"
+        assert (
+            settings.MIDDLEWARE[0] == "incidentary.integrations.django.IncidentaryDjangoMiddleware"
+        )
 
     def test_patch_preserves_existing_middleware(self):
         existing = ["existing.Middleware", "other.Middleware"]
@@ -154,7 +155,9 @@ class TestDjangoPatch:
             integration.patch(client)
             integration.patch(client)  # second call should be a no-op
 
-        count = settings.MIDDLEWARE.count("incidentary.integrations.django.IncidentaryDjangoMiddleware")
+        count = settings.MIDDLEWARE.count(
+            "incidentary.integrations.django.IncidentaryDjangoMiddleware"
+        )
         assert count == 1
 
     def test_patch_skips_when_settings_not_configured(self):
@@ -167,7 +170,10 @@ class TestDjangoPatch:
             client = _make_stub_client()
             integration.patch(client)
 
-        assert "incidentary.integrations.django.IncidentaryDjangoMiddleware" not in settings.MIDDLEWARE
+        assert (
+            "incidentary.integrations.django.IncidentaryDjangoMiddleware"
+            not in settings.MIDDLEWARE
+        )
 
     def test_patch_does_not_raise_when_django_missing(self):
         from incidentary.integrations.django import DjangoIntegration
@@ -202,7 +208,10 @@ class TestDjangoUnpatch:
             integration.patch(client)
             integration.unpatch()
 
-        assert "incidentary.integrations.django.IncidentaryDjangoMiddleware" not in settings.MIDDLEWARE
+        assert (
+            "incidentary.integrations.django.IncidentaryDjangoMiddleware"
+            not in settings.MIDDLEWARE
+        )
 
     def test_unpatch_without_patch_does_not_raise(self):
         from incidentary.integrations.django import DjangoIntegration
@@ -211,7 +220,7 @@ class TestDjangoUnpatch:
         integration.unpatch()  # must not raise
 
     def test_unpatch_is_idempotent(self):
-        django_mod, settings = _build_fake_django()
+        django_mod, _settings = _build_fake_django()
         with patch.dict(sys.modules, {"django": django_mod, "django.conf": django_mod.conf}):
             from incidentary.integrations.django import DjangoIntegration
 
@@ -261,8 +270,8 @@ class TestDjangoMiddlewareRequestHandling:
         assert result is expected_response
 
     def test_middleware_extracts_trace_id_from_header(self):
+        from incidentary.context import get_trace_context
         from incidentary.integrations.django import IncidentaryDjangoMiddleware
-        from incidentary.context import get_trace_context, clear_trace_context
 
         captured_ctx = []
 
@@ -284,8 +293,8 @@ class TestDjangoMiddlewareRequestHandling:
         assert captured_ctx[0].trace_id == "trace-django-123"
 
     def test_middleware_generates_trace_id_when_no_header(self):
-        from incidentary.integrations.django import IncidentaryDjangoMiddleware
         from incidentary.context import get_trace_context
+        from incidentary.integrations.django import IncidentaryDjangoMiddleware
 
         captured_ctx = []
 
@@ -343,8 +352,8 @@ class TestDjangoMiddlewareRequestHandling:
         assert opts.status == 500
 
     def test_middleware_clears_context_after_request(self):
-        from incidentary.integrations.django import IncidentaryDjangoMiddleware
         from incidentary.context import get_trace_context
+        from incidentary.integrations.django import IncidentaryDjangoMiddleware
 
         response = MagicMock()
         response.status_code = 200
@@ -360,8 +369,8 @@ class TestDjangoMiddlewareRequestHandling:
         assert get_trace_context() is None
 
     def test_middleware_clears_context_even_on_exception(self):
-        from incidentary.integrations.django import IncidentaryDjangoMiddleware
         from incidentary.context import get_trace_context
+        from incidentary.integrations.django import IncidentaryDjangoMiddleware
 
         def failing_get_response(req):
             raise RuntimeError("error")

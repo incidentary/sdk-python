@@ -61,7 +61,7 @@ class IntegrationRegistry:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def discover_and_patch(self, client: "IncidentaryClient") -> None:
+    def discover_and_patch(self, client: IncidentaryClient) -> None:
         """For each registered integration, call detect(); patch if True.
 
         Exceptions from either :meth:`detect` or :meth:`patch` are caught

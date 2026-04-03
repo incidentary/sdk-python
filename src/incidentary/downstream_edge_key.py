@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal, Mapping, Optional
+from typing import Literal
 
 RetryKeyQuality = Literal[
     "explicit",
@@ -24,7 +25,9 @@ class DownstreamEdgeKeyResolution:
     key_for_hash: str
 
 
-_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.IGNORECASE)
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.IGNORECASE
+)
 _NUMERIC_RE = re.compile(r"^\d+$")
 _LONG_HEX_RE = re.compile(r"^[0-9a-f]{16,}$", re.IGNORECASE)
 
@@ -36,7 +39,7 @@ class DownstreamEdgeKeyResolver:
         trace_id: str,
         method: str,
         url: str,
-        metadata: Optional[Mapping[str, object]] = None,
+        metadata: Mapping[str, object] | None = None,
     ) -> DownstreamEdgeKeyResolution:
         md = metadata or {}
         method_norm = (method or "GET").strip().upper() or "GET"
@@ -50,8 +53,14 @@ class DownstreamEdgeKeyResolver:
         )
 
         if explicit_key is not None:
-            edge_key = _first_non_empty(md.get("edge_key"), md.get("downstream_service"), normalized_edge) or "unknown"
-            route_key = _first_non_empty(md.get("route_template"), md.get("route_key"), normalized_route) or "/"
+            edge_key = (
+                _first_non_empty(md.get("edge_key"), md.get("downstream_service"), normalized_edge)
+                or "unknown"
+            )
+            route_key = (
+                _first_non_empty(md.get("route_template"), md.get("route_key"), normalized_route)
+                or "/"
+            )
             return DownstreamEdgeKeyResolution(
                 edge_key=edge_key,
                 route_key=route_key,
@@ -62,7 +71,10 @@ class DownstreamEdgeKeyResolver:
 
         route_template = _first_non_empty(md.get("route_template"), md.get("route_key"))
         if route_template is not None:
-            edge_key = _first_non_empty(md.get("edge_key"), md.get("downstream_service"), normalized_edge) or "unknown"
+            edge_key = (
+                _first_non_empty(md.get("edge_key"), md.get("downstream_service"), normalized_edge)
+                or "unknown"
+            )
             canonical_route = _canonicalize_route(route_template)
             operation_key = f"{method_norm} {canonical_route}"
             return DownstreamEdgeKeyResolution(
@@ -106,7 +118,7 @@ class DownstreamEdgeKeyResolver:
         )
 
 
-def _first_non_empty(*values: object) -> Optional[str]:
+def _first_non_empty(*values: object) -> str | None:
     for value in values:
         if not isinstance(value, str):
             continue

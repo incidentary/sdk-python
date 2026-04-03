@@ -5,12 +5,11 @@ TDD: Tests written first, before implementation.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from incidentary.auto_instrument import auto_instrument, is_patched, undo_patches
-
+from incidentary.auto_instrument import is_patched, undo_patches
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -483,7 +482,7 @@ class TestDefaultIntegrations:
 
         first = default_integrations()
         second = default_integrations()
-        for a, b in zip(first, second):
+        for a, b in zip(first, second, strict=False):
             assert a is not b
 
 
@@ -568,7 +567,6 @@ class TestClientIntegration:
         assert is_patched() is False
 
     def test_registry_stored_on_client_contains_registered_integrations(self):
-        from incidentary.integrations.http import HTTPIntegration
 
         client = self._make_client(auto_instrument=True)
         registered_names = [i.name for i in client._registry.registered]

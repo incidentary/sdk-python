@@ -34,7 +34,7 @@ class KombuIntegration(Integration):
     def detect(self) -> bool:
         return importlib.util.find_spec("kombu") is not None
 
-    def patch(self, client: "IncidentaryClient") -> None:
+    def patch(self, client: IncidentaryClient) -> None:
         if self._patched:
             return
         try:
@@ -52,7 +52,6 @@ class KombuIntegration(Integration):
             ) -> Any:
                 try:
                     from ..context import get_trace_context
-                    from ..types import PARENT_CE_HEADER, TRACE_ID_HEADER
 
                     ctx = get_trace_context()
                     if ctx is not None:

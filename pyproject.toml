@@ -32,9 +32,47 @@ Changelog = "https://github.com/incidentary/sdk-python/blob/main/CHANGELOG.md"
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.11",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/incidentary"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 99
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "F",     # pyflakes
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "I",     # isort
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "SIM",   # flake8-simplify
+    "RUF",   # ruff-specific rules
+]
+ignore = [
+    "E501",    # line length handled by formatter
+    "SIM105",  # contextlib.suppress — explicit try/except is clearer in fail-open SDK code
+    "RUF012",  # mutable class-var defaults — false positives in test fixtures
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "B017",   # pytest.raises(Exception) is intentional in tests
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["incidentary"]

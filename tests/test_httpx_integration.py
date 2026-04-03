@@ -6,10 +6,9 @@ httpx is mocked throughout; it does not need to be installed.
 from __future__ import annotations
 
 import sys
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -224,7 +223,6 @@ class TestHttpxSyncHeaderInjection:
             return fake_httpx.HTTPTransport.handle_request.__wrapped__(self, request)
 
         # We'll capture by inspecting the request passed to the original
-        original_handle = fake_httpx.HTTPTransport.handle_request
 
         class CapturingTransport(fake_httpx.HTTPTransport):
             def handle_request(self, request):

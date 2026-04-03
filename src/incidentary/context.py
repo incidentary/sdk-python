@@ -5,7 +5,6 @@ from __future__ import annotations
 import threading
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -15,9 +14,7 @@ class TraceContext:
 
 
 _sync_context = threading.local()
-_async_context: ContextVar[Optional[TraceContext]] = ContextVar(
-    "incidentary_trace", default=None
-)
+_async_context: ContextVar[TraceContext | None] = ContextVar("incidentary_trace", default=None)
 
 
 def set_trace_context(trace_id: str, ce_id: str) -> None:
@@ -27,7 +24,7 @@ def set_trace_context(trace_id: str, ce_id: str) -> None:
     _async_context.set(ctx)
 
 
-def get_trace_context() -> Optional[TraceContext]:
+def get_trace_context() -> TraceContext | None:
     """Get current trace context. Tries ContextVar first (async), falls back to threading.local (sync)."""
     ctx = _async_context.get(None)
     if ctx is not None:

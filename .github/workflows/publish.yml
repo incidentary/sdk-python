@@ -17,18 +17,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
+      - uses: astral-sh/setup-uv@v6
 
       - name: Install dependencies
-        run: pip install -e '.[dev]'
+        run: uv sync --group dev
+
+      - name: Lint
+        run: uv run ruff check src/ tests/
 
       - name: Test
-        run: pytest -v
+        run: uv run pytest -v
 
       - name: Build
-        run: pip install build && python -m build
+        run: uv build
 
       - name: Publish
         uses: pypa/gh-action-pypi-publish@release/v1

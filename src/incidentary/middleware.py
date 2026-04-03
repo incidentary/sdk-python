@@ -6,25 +6,25 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from typing import Any, Callable, Mapping, Optional
+from collections.abc import Callable, Mapping
+from typing import Any
 
 from .client import IncidentaryClient
 from .context import clear_trace_context, set_trace_context
 from .downstream_edge_key import DownstreamEdgeKeyResolution, DownstreamEdgeKeyResolver
 from .types import (
-    CeDetail,
-    CeKind,
     PARENT_CE_HEADER,
     TRACE_ID_HEADER,
+    CeDetail,
+    CeKind,
     RecordRequestOptions,
-    RetryKeyQuality,
     SkeletonCe,
 )
 
 resolver = DownstreamEdgeKeyResolver()
 
 
-def extract_trace_context(headers: Mapping[str, str | list[str] | None]) -> tuple[str, Optional[str]]:
+def extract_trace_context(headers: Mapping[str, str | list[str] | None]) -> tuple[str, str | None]:
     """Extract trace_id and parent_ce_id from request headers."""
     lower = {
         str(k).lower(): str(v)
@@ -189,14 +189,14 @@ class IncidentaryASGIMiddleware:
 
 def instrumented_urlopen(
     client: IncidentaryClient,
-    parent_context: Optional[dict[str, str]],
+    parent_context: dict[str, str] | None,
     url: str,
     *,
     method: str = "GET",
-    headers: Optional[dict[str, str]] = None,
+    headers: dict[str, str] | None = None,
     data: bytes | bytearray | None = None,
-    timeout: Optional[float] = None,
-    retry_metadata: Optional[Mapping[str, object]] = None,
+    timeout: float | None = None,
+    retry_metadata: Mapping[str, object] | None = None,
 ):
     """Instrument outbound urllib call and emit HTTP_OUT CE + trigger signals."""
     trace_id = (parent_context or {}).get("trace_id") or str(uuid.uuid4())
@@ -207,11 +207,15 @@ def instrumented_urlopen(
     inject_trace_context(request_headers, trace_id, ce_id)
 
     normalized_method = (method or "GET").upper()
-    edge = resolver.resolve(trace_id=trace_id, method=normalized_method, url=url, metadata=retry_metadata)
+    edge = resolver.resolve(
+        trace_id=trace_id, method=normalized_method, url=url, metadata=retry_metadata
+    )
     explicit_retry_observed = _extract_explicit_retry_observed(retry_metadata)
     retry_key_hash = _hash_retry_identity(edge.key_for_hash)
 
-    request = urllib.request.Request(url=url, data=data, headers=request_headers, method=normalized_method)
+    request = urllib.request.Request(
+        url=url, data=data, headers=request_headers, method=normalized_method
+    )
 
     status_code = 0
     timed_out = False
@@ -222,7 +226,7 @@ def instrumented_urlopen(
     client.record_request_start("HTTP_OUT")
 
     try:
-        response = urllib.request.urlopen(request, timeout=timeout)  # noqa: S310
+        response = urllib.request.urlopen(request, timeout=timeout)
         status_code = int(getattr(response, "status", 0) or 0)
         if getattr(response, "headers", None) is not None:
             response_headers = {str(k).lower(): str(v) for k, v in response.headers.items()}
@@ -285,7 +289,7 @@ def _build_inbound_detail(
     environ: Mapping[str, object],
     request_headers: Mapping[str, str],
     response_headers: list[tuple[str, str]],
-) -> Optional[CeDetail]:
+) -> CeDetail | None:
     if not client.should_capture_detail_for_current_mode():
         return None
 
@@ -303,8 +307,12 @@ def _build_inbound_detail(
         route_template=route_template,
         request_bytes=_parse_content_length(_optional_str(environ.get("CONTENT_LENGTH"))),
         response_bytes=_parse_content_length(response_headers_map.get("content-length")),
-        request_headers=_filter_headers(request_headers, client.get_detail_request_header_allowlist()),
-        response_headers=_filter_headers(response_headers_map, client.get_detail_response_header_allowlist()),
+        request_headers=_filter_headers(
+            request_headers, client.get_detail_request_header_allowlist()
+        ),
+        response_headers=_filter_headers(
+            response_headers_map, client.get_detail_response_header_allowlist()
+        ),
         local_error_classification="none",
     )
 
@@ -315,25 +323,35 @@ def _build_outbound_detail(
     response_headers: Mapping[str, str],
     method: str,
     edge: DownstreamEdgeKeyResolution,
-    retry_metadata: Optional[Mapping[str, object]],
-    explicit_retry_observed: Optional[bool],
+    retry_metadata: Mapping[str, object] | None,
+    explicit_retry_observed: bool | None,
     request_body: bytes | bytearray | None,
     cancelled: bool,
     timed_out: bool,
-) -> Optional[CeDetail]:
+) -> CeDetail | None:
     if not client.should_capture_detail_for_current_mode():
         return None
 
-    request_bytes = len(request_body) if request_body is not None else _parse_content_length(request_headers.get("content-length"))
+    request_bytes = (
+        len(request_body)
+        if request_body is not None
+        else _parse_content_length(request_headers.get("content-length"))
+    )
 
     return CeDetail(
         method=method,
         route_key=edge.route_key,
-        route_template=_optional_str((retry_metadata or {}).get("route_template") if retry_metadata else None),
+        route_template=_optional_str(
+            (retry_metadata or {}).get("route_template") if retry_metadata else None
+        ),
         request_bytes=request_bytes,
         response_bytes=_parse_content_length(response_headers.get("content-length")),
-        request_headers=_filter_headers(request_headers, client.get_detail_request_header_allowlist()),
-        response_headers=_filter_headers(response_headers, client.get_detail_response_header_allowlist()),
+        request_headers=_filter_headers(
+            request_headers, client.get_detail_request_header_allowlist()
+        ),
+        response_headers=_filter_headers(
+            response_headers, client.get_detail_response_header_allowlist()
+        ),
         retry={
             "explicit_observed": explicit_retry_observed,
             "key_quality": edge.key_quality,
@@ -342,16 +360,26 @@ def _build_outbound_detail(
         },
         downstream={
             "edge_key": edge.edge_key,
-            "service": _optional_str((retry_metadata or {}).get("downstream_service") if retry_metadata else None),
-            "operation_name": _optional_str((retry_metadata or {}).get("operation_name") if retry_metadata else None),
+            "service": _optional_str(
+                (retry_metadata or {}).get("downstream_service") if retry_metadata else None
+            ),
+            "operation_name": _optional_str(
+                (retry_metadata or {}).get("operation_name") if retry_metadata else None
+            ),
             "key_quality": edge.key_quality,
         },
-        local_error_classification="timeout" if timed_out else "cancelled" if cancelled else "none",
-        payload_snippet=request_body.decode("utf-8", errors="ignore") if request_body is not None else None,
+        local_error_classification="timeout"
+        if timed_out
+        else "cancelled"
+        if cancelled
+        else "none",
+        payload_snippet=request_body.decode("utf-8", errors="ignore")
+        if request_body is not None
+        else None,
     )
 
 
-def _extract_explicit_retry_observed(metadata: Optional[Mapping[str, object]]) -> Optional[bool]:
+def _extract_explicit_retry_observed(metadata: Mapping[str, object] | None) -> bool | None:
     if metadata is None:
         return None
 
@@ -375,7 +403,7 @@ def _hash_retry_identity(identity: str) -> int:
     return hash_value
 
 
-def _filter_headers(headers: Mapping[str, str], allowlist: list[str]) -> Optional[dict[str, str]]:
+def _filter_headers(headers: Mapping[str, str], allowlist: list[str]) -> dict[str, str] | None:
     if not allowlist:
         return None
 
@@ -388,7 +416,7 @@ def _filter_headers(headers: Mapping[str, str], allowlist: list[str]) -> Optiona
     return out if out else None
 
 
-def _parse_content_length(value: Optional[str]) -> Optional[int]:
+def _parse_content_length(value: str | None) -> int | None:
     if value is None:
         return None
 
@@ -400,7 +428,7 @@ def _parse_content_length(value: Optional[str]) -> Optional[int]:
     return parsed if parsed >= 0 else None
 
 
-def _optional_str(value: object) -> Optional[str]:
+def _optional_str(value: object) -> str | None:
     if isinstance(value, str):
         normalized = value.strip()
         return normalized if normalized else None

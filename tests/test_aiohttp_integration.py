@@ -6,10 +6,9 @@ aiohttp is mocked throughout; it does not need to be installed.
 from __future__ import annotations
 
 import sys
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -204,7 +203,6 @@ class TestAiohttpHeaderInjection:
         with patch.dict(sys.modules, {"aiohttp": fake_aiohttp}):
             from incidentary.context import clear_trace_context, set_trace_context
             from incidentary.integrations.aiohttp_integration import AiohttpIntegration
-            from incidentary.types import PARENT_CE_HEADER, TRACE_ID_HEADER
 
             integration = AiohttpIntegration()
             client = _make_stub_client()
@@ -212,7 +210,7 @@ class TestAiohttpHeaderInjection:
 
             captured_kwargs: dict = {}
 
-            original_request = fake_aiohttp.ClientSession._request.__wrapped__ if hasattr(
+            fake_aiohttp.ClientSession._request.__wrapped__ if hasattr(
                 fake_aiohttp.ClientSession._request, "__wrapped__"
             ) else None
 
@@ -368,8 +366,8 @@ class TestAiohttpHeaderInjection:
 
 class TestAiohttpABCConformance:
     def test_aiohttp_integration_is_instance_of_integration_abc(self):
-        from incidentary.integrations.base import Integration
         from incidentary.integrations.aiohttp_integration import AiohttpIntegration
+        from incidentary.integrations.base import Integration
 
         assert isinstance(AiohttpIntegration(), Integration)
 

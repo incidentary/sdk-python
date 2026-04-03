@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from .base import Integration
@@ -18,15 +18,15 @@ logger = logging.getLogger("incidentary.integrations.django")
 _MIDDLEWARE_PATH = "incidentary.integrations.django.IncidentaryDjangoMiddleware"
 
 # Module-level client reference accessed by the middleware class.
-_client: Optional["IncidentaryClient"] = None
+_client: IncidentaryClient | None = None
 
 
-def _set_client(client: "IncidentaryClient") -> None:
+def _set_client(client: IncidentaryClient) -> None:
     global _client
     _client = client
 
 
-def _get_client() -> Optional["IncidentaryClient"]:
+def _get_client() -> IncidentaryClient | None:
     return _client
 
 
@@ -48,7 +48,7 @@ class DjangoIntegration(Integration):
     def detect(self) -> bool:
         return importlib.util.find_spec("django") is not None
 
-    def patch(self, client: "IncidentaryClient") -> None:
+    def patch(self, client: IncidentaryClient) -> None:
         if self._patched:
             return
         try:
@@ -97,11 +97,10 @@ class IncidentaryDjangoMiddleware:
         self._client = _get_client()
 
     def __call__(self, request: Any) -> Any:
-        trace_id = (request.META.get("HTTP_X_INCIDENTARY_TRACE_ID") or str(uuid4()))
+        trace_id = request.META.get("HTTP_X_INCIDENTARY_TRACE_ID") or str(uuid4())
         ce_id = str(uuid4())
 
         from ..context import clear_trace_context, set_trace_context
-        from ..types import RecordEventOptions
 
         set_trace_context(trace_id, ce_id)
         start_ns = time.perf_counter_ns()
@@ -122,8 +121,8 @@ class IncidentaryDjangoMiddleware:
 def _record_http_in(
     start_ns: int,
     status_code: int,
-    trace_id: Optional[str],
-    ce_id: Optional[str],
+    trace_id: str | None,
+    ce_id: str | None,
 ) -> None:
     """Record an http_in event. Never raises."""
     try:

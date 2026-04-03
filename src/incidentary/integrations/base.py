@@ -29,7 +29,7 @@ class Integration(ABC):
         ...
 
     @abstractmethod
-    def patch(self, client: "IncidentaryClient") -> None:
+    def patch(self, client: IncidentaryClient) -> None:
         """Apply instrumentation patches, storing a reference to *client*."""
         ...
 

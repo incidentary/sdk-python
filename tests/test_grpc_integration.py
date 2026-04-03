@@ -6,11 +6,9 @@ grpc is mocked throughout; it does not need to be installed.
 from __future__ import annotations
 
 import importlib.util
-import sys
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -440,7 +438,7 @@ class TestServerInterceptorContextExtraction:
 
     def test_sets_trace_context_during_handler(self):
         from incidentary.context import clear_trace_context, get_trace_context
-        from incidentary.types import TRACE_ID_HEADER, PARENT_CE_HEADER
+        from incidentary.types import PARENT_CE_HEADER, TRACE_ID_HEADER
 
         clear_trace_context()
         interceptor = self._make_interceptor()
@@ -458,7 +456,7 @@ class TestServerInterceptorContextExtraction:
 
     def test_clears_trace_context_after_handler(self):
         from incidentary.context import clear_trace_context, get_trace_context
-        from incidentary.types import TRACE_ID_HEADER, PARENT_CE_HEADER
+        from incidentary.types import PARENT_CE_HEADER, TRACE_ID_HEADER
 
         clear_trace_context()
         interceptor = self._make_interceptor()
@@ -472,7 +470,7 @@ class TestServerInterceptorContextExtraction:
         assert get_trace_context() is None
 
     def test_handles_missing_trace_headers_gracefully(self):
-        from incidentary.context import clear_trace_context, get_trace_context
+        from incidentary.context import clear_trace_context
 
         clear_trace_context()
         interceptor = self._make_interceptor()
@@ -489,7 +487,7 @@ class TestServerInterceptorContextExtraction:
 
     def test_clears_context_after_handler_even_on_exception(self):
         from incidentary.context import clear_trace_context, get_trace_context
-        from incidentary.types import TRACE_ID_HEADER, PARENT_CE_HEADER
+        from incidentary.types import PARENT_CE_HEADER, TRACE_ID_HEADER
 
         clear_trace_context()
         interceptor = self._make_interceptor()
@@ -560,8 +558,8 @@ class TestServerInterceptorEventRecording:
 class TestServerInterceptorNeverRaises:
     def test_broken_set_trace_context_does_not_raise(self):
         from incidentary.context import clear_trace_context
-        from incidentary.types import TRACE_ID_HEADER, PARENT_CE_HEADER
         from incidentary.integrations.grpc_integration import IncidentaryServerInterceptor
+        from incidentary.types import PARENT_CE_HEADER, TRACE_ID_HEADER
 
         clear_trace_context()
         interceptor = IncidentaryServerInterceptor(None)
@@ -594,6 +592,7 @@ class TestServerInterceptorNeverRaises:
             "incidentary.integrations.grpc_integration.clear_trace_context",
             side_effect=RuntimeError("clear broken"),
         ):
+
             def continuation(details):
                 return MagicMock()
 
