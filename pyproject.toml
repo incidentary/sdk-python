@@ -9,6 +9,7 @@ requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 description = "Incidentary Python SDK"
+readme = "README.md"
 authors = [{ name = "Ahmed Adly" }]
 dependencies = []
 classifiers = [
