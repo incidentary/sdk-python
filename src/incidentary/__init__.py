@@ -32,6 +32,7 @@ from .middleware import (
 )
 from .ring_buffer import RingBuffer
 from .serverless import incidentary_handler
+from .track_deploy import TrackDeployConfig, TrackDeployOptions, track_deploy
 from .types import (
     PARENT_CE_HEADER,
     TRACE_ID_HEADER,
@@ -73,6 +74,8 @@ __all__ = [
     "RingBuffer",
     "SkeletonCe",
     "TraceContext",
+    "TrackDeployConfig",
+    "TrackDeployOptions",
     "auto_instrument",
     "clear_trace_context",
     "default_integrations",
@@ -83,5 +86,6 @@ __all__ = [
     "instrumented_urlopen",
     "is_patched",
     "set_trace_context",
+    "track_deploy",
     "undo_patches",
 ]
