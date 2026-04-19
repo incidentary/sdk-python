@@ -8,6 +8,7 @@ from .context import (
     get_trace_context,
     set_trace_context,
 )
+from .ids import new_id
 from .integrations import (
     AiohttpIntegration,
     AsyncpgIntegration,
@@ -85,6 +86,7 @@ __all__ = [
     "inject_trace_context",
     "instrumented_urlopen",
     "is_patched",
+    "new_id",
     "set_trace_context",
     "track_deploy",
     "undo_patches",
