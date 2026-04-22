@@ -1,60 +1,38 @@
-"""Identifier generators for the Incidentary Python SDK.
+"""Canonical UUIDv4 id generator for the Incidentary Python SDK.
 
-Exposes two functions with a deliberate split:
+UUIDv4 (RFC 9562 §5.4) is 122 bits of CSPRNG random with no embedded
+timestamp. The server accepts v1/v4/v7 transparently — the binary
+representation is identical across versions — but all first-party SDKs
+emit v4.
 
-- :func:`new_id` — UUIDv7 (RFC 9562) for database-backed identifiers
-  (trace IDs, CE IDs, anywhere sort-key locality matters).
-- :func:`new_random_token` — UUIDv4 for externally visible,
-  privacy-sensitive tokens (deploy dedup keys, share-URL slugs,
-  anywhere the 48-bit millisecond timestamp that v7 embeds would leak
-  the creation time across a trust boundary).
+The earlier spec drafts recommended UUIDv7 on the grounds that the
+48-bit millisecond prefix would improve server-side storage locality.
+That reasoning was wrong for the Incidentary server schema:
 
-Binary-compatible with v4 on the wire: both share the 128-bit UUID
-layout, so either form slots into a ``uuid`` column transparently.
+- ClickHouse compares UUIDs second-half-first for historical reasons,
+  so v7's timestamp prefix contributes nothing to sparse-index
+  ordering or pruning.
+- Every UUID-bearing ClickHouse table already carries time locality in
+  an explicit ``i64`` nanosecond column that sits *before* the UUID in
+  the sort key.
 
-Pure stdlib implementation. The project targets Python 3.11+, which
-does not yet ship a native ``uuid.uuid7()``; the layout here matches
-what a future stdlib implementation (and peer SDKs in Node/Go/.NET)
-must produce. For :func:`new_random_token` we delegate to
-``uuid.uuid4()`` which has always been stdlib.
+With the storage-locality case empty, the remaining consideration is
+the v7 48-bit timestamp prefix — a recoverable creation-time side
+channel for any value that might cross a trust boundary. v4 has no
+such leak.
+
+Backed by :func:`uuid.uuid4` (stdlib), which wraps ``os.urandom`` →
+the OS CSPRNG. Suitable for unguessable identifiers; not a substitute
+for cryptographic keys.
 """
 
 from __future__ import annotations
 
-import os
-import time
 import uuid
 
-__all__ = ["new_id", "new_random_token"]
+__all__ = ["new_id"]
 
 
 def new_id() -> str:
-    """Return a canonical UUIDv7 string.
-
-    Format (RFC 9562 §5.7):
-    - 48 bits: Unix-epoch milliseconds (big-endian)
-    - 4 bits: version = 7
-    - 12 bits: rand_a (random)
-    - 2 bits: variant = 10 (RFC 4122)
-    - 62 bits: rand_b (random)
-    """
-    unix_ms = int(time.time() * 1000) & 0xFFFFFFFFFFFF  # 48 bits
-
-    rand_a = int.from_bytes(os.urandom(2), "big") & 0x0FFF  # 12 bits
-    rand_b = int.from_bytes(os.urandom(8), "big") & 0x3FFFFFFFFFFFFFFF  # 62 bits
-
-    # Pack into a 128-bit integer: [48 ts][4 ver=7][12 rand_a][2 var=10][62 rand_b]
-    value = (unix_ms << 80) | (0x7 << 76) | (rand_a << 64) | (0b10 << 62) | rand_b
-
-    return str(uuid.UUID(int=value))
-
-
-def new_random_token() -> str:
-    """Return a canonical UUIDv4 string.
-
-    122 bits of CSPRNG output with no embedded timestamp. Use this for
-    externally visible tokens (deploy dedup keys attached to public
-    URLs, share-URL slugs, CSRF nonces) where the creation time
-    embedded in a UUIDv7 would be a side channel.
-    """
+    """Return a canonical UUIDv4 string (RFC 9562 §5.4)."""
     return str(uuid.uuid4())

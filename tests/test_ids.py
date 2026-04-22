@@ -1,19 +1,16 @@
-"""Tests for the UUIDv7 / UUIDv4 identifier helpers."""
+"""Tests for the UUIDv4 id helper."""
 
 from __future__ import annotations
 
 import re
-import time
 import uuid
 
-from incidentary.ids import new_id, new_random_token
+from incidentary.ids import new_id
 
 
-UUIDV7_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-    re.IGNORECASE,
-)
-
+# Canonical UUIDv4 shape: the 14th hex character (first char of the
+# third group) is '4'; the 19th hex character (first char of the
+# fourth group) is one of 8/9/a/b (RFC 4122 variant bits).
 UUIDV4_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
     re.IGNORECASE,
@@ -27,79 +24,45 @@ class TestNewId:
         parsed = uuid.UUID(generated)
         assert str(parsed) == generated
 
-    def test_has_v7_version_nibble(self):
+    def test_has_v4_version_nibble(self):
+        # The whole point of unifying on v4: a future refactor that
+        # silently swaps uuid4() for uuid7() must not slip through
+        # review. This test screams the moment the version nibble
+        # stops being '4'.
         generated = new_id()
-        assert UUIDV7_RE.match(generated) is not None, generated
+        assert UUIDV4_RE.match(generated) is not None, generated
+
+    def test_has_version_4_via_stdlib_reflection(self):
+        assert uuid.UUID(new_id()).version == 4
 
     def test_variant_bits_match_rfc4122(self):
         generated = new_id()
-        # Canonical string: group 4 starts with variant bits
         parts = generated.split("-")
         assert parts[3][0] in "89ab"
 
-    def test_is_time_ordered_across_small_delay(self):
-        first = new_id()
-        time.sleep(0.002)
-        second = new_id()
-        # v7 encodes wall-clock ms in the leading bits, so
-        # lexicographic order matches chronological order.
-        assert first < second
+    def test_returns_distinct_ids_across_many_samples(self):
+        # v4 has 122 random bits; collision across 1024 samples is
+        # effectively zero. A collision here proves the RNG is seeded
+        # or deterministic — a fatal bug for bearer-token use.
+        ids = {new_id() for _ in range(1024)}
+        assert len(ids) == 1024
 
-    def test_returns_distinct_ids_within_same_millisecond(self):
-        # rand_b segment provides uniqueness within a ms.
-        ids = {new_id() for _ in range(256)}
-        assert len(ids) == 256
-
-    def test_timestamp_is_close_to_current_time(self):
-        # The first 48 bits encode unix-millis; confirm they're within
-        # a generous envelope of now (±5 s for CI jitter).
-        before = int(time.time() * 1000)
-        generated = new_id()
-        after = int(time.time() * 1000)
-
-        ts_hex = generated.replace("-", "")[:12]
-        ts_ms = int(ts_hex, 16)
-        assert before - 5_000 <= ts_ms <= after + 5_000
-
-
-class TestNewRandomToken:
-    def test_returns_canonical_uuid_string(self):
-        generated = new_random_token()
-        parsed = uuid.UUID(generated)
-        assert str(parsed) == generated
-
-    def test_has_v4_version_nibble(self):
-        generated = new_random_token()
-        assert UUIDV4_RE.match(generated) is not None, generated
-
-    def test_variant_bits_match_rfc4122(self):
-        parts = new_random_token().split("-")
-        assert parts[3][0] in "89ab"
-
-    def test_never_reuses_v7_version_nibble(self):
-        for _ in range(64):
-            parts = new_random_token().split("-")
-            assert parts[2][0] == "4", f"expected v4, got {parts[2][0]}"
-
-    def test_returns_distinct_tokens_across_many_calls(self):
-        tokens = {new_random_token() for _ in range(512)}
-        assert len(tokens) == 512
-
-    def test_is_not_monotonic_by_generation_time(self):
-        # Over 40 pairs we MUST see both orderings. A mis-wired
-        # implementation returning v7 would always satisfy a < b.
-        saw_ascending = False
-        saw_descending_or_equal = False
-        for _ in range(40):
-            a = new_random_token()
-            time.sleep(0.002)
-            b = new_random_token()
+    def test_is_not_serially_ordered(self):
+        # v4 has no embedded timestamp, so two ids generated
+        # back-to-back must not have a systematic lexicographic
+        # relationship. Guards against a regression that reinstates
+        # a time-ordered generator.
+        lt = gt = 0
+        for _ in range(500):
+            a = new_id()
+            b = new_id()
             if a < b:
-                saw_ascending = True
+                lt += 1
+            elif a > b:
+                gt += 1
             else:
-                saw_descending_or_equal = True
-            if saw_ascending and saw_descending_or_equal:
-                return
-        raise AssertionError(
-            "v4 tokens must not be monotonic by generation time"
-        )
+                raise AssertionError("impossible collision")
+        # Each side should land in [150, 350] (well inside a 12σ
+        # envelope around 250/500).
+        assert 150 <= lt <= 350, f"a<b happened {lt}/500 times"
+        assert 150 <= gt <= 350, f"a>b happened {gt}/500 times"
