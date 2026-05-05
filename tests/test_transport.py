@@ -12,7 +12,7 @@ from incidentary.types import SkeletonCe
 
 def make_http_error(status: int, payload: dict) -> urllib.error.HTTPError:
     return urllib.error.HTTPError(
-        url="http://localhost/api/v1/ingest/batch",
+        url="http://localhost/api/v2/ingest",
         code=status,
         msg="error",
         hdrs=None,
@@ -22,13 +22,13 @@ def make_http_error(status: int, payload: dict) -> urllib.error.HTTPError:
 
 def _make_ce(**overrides) -> SkeletonCe:
     defaults = {
-        "ce_id": "ce-1",
+        "id": "ce-1",
         "trace_id": "trace-1",
-        "parent_ce_id": None,
+        "parent_id": None,
         "service_id": "svc",
-        "wall_ts_ns": 1_000_000_000,
-        "kind": "HTTP_IN",
-        "status": 200,
+        "occurred_at": 1_000_000_000,
+        "kind": "HTTP_SERVER",
+        "status_code": 200,
         "duration_ns": 1_000,
     }
     defaults.update(overrides)
@@ -275,7 +275,9 @@ class TestDoUpload:
         assert captured_requests[0].get_header("X-incidentary-incident-id") == "inc_456"
         assert captured_requests[0].get_header("Authorization") == "Bearer test-key"
 
-    def test_426_version_rejected_prints_and_succeeds(self, monkeypatch, capsys):
+    def test_426_version_rejected_logs_and_succeeds(self, monkeypatch, caplog):
+        import logging
+
         monkeypatch.setattr(
             "incidentary.transport.urllib.request.urlopen",
             lambda *a, **k: (_ for _ in ()).throw(
@@ -284,18 +286,18 @@ class TestDoUpload:
                     {
                         "error": {
                             "code": "SDK_VERSION_TOO_OLD",
-                            "minimum_version": "1.0.0",
-                            "current_version": "0.2.0",
+                            "minimum_version": "2.0.0",
+                            "current_version": "1.0.0",
                         }
                     },
                 )
             ),
         )
         t = Transport(base_url="http://localhost", api_key="key")
-        t._do_upload(b"{}", None)
+        with caplog.at_level(logging.WARNING, logger="incidentary.transport"):
+            t._do_upload(b"{}", None)
 
-        output = capsys.readouterr().out
-        assert "incidentary_sdk_version_rejected" in output
+        assert "SDK version rejected" in caplog.text
         assert t._backend_healthy is True
 
     def test_429_non_free_limit_retries_and_fails(self, monkeypatch):
@@ -490,19 +492,22 @@ class TestNotifyBackend:
 
 
 class TestPauseOnFreeCeLimit:
-    def test_pauses_on_valid_free_limit_payload(self, monkeypatch, capsys):
+    def test_pauses_on_valid_free_limit_payload(self, monkeypatch, caplog):
+        import logging
+
         errors = []
         monkeypatch.setattr("incidentary.transport.time.time", lambda: 1_710_244_800.0)
         t = Transport(base_url="http://localhost", api_key="key", on_error=errors.append)
 
-        result = t._pause_on_free_ce_limit(
-            {"error": "ce_limit_reached", "limit_type": "ce", "plan": "free", "limit": 200_000}
-        )
+        with caplog.at_level(logging.WARNING, logger="incidentary.transport"):
+            result = t._pause_on_free_ce_limit(
+                {"error": "ce_limit_reached", "limit_type": "ce", "plan": "free", "limit": 200_000}
+            )
 
         assert result is True
         assert t._quota_pause_until_ms > 0
         assert "Pausing ingest until" in str(errors[0])
-        assert "incidentary_ce_limit_reached" in capsys.readouterr().out
+        assert "CE limit reached" in caplog.text
 
     def test_ignores_non_free_limit(self):
         t = Transport(base_url="http://localhost", api_key="key")
@@ -568,7 +573,9 @@ class TestNormalizeError:
 # ---------------------------------------------------------------------------
 
 
-def test_transport_pauses_after_free_ce_limit(monkeypatch, capsys):
+def test_transport_pauses_after_free_ce_limit(monkeypatch, caplog):
+    import logging
+
     errors = []
     current_time_s = 1_710_244_800.0
     monkeypatch.setattr("incidentary.transport.time.time", lambda: current_time_s)
@@ -593,10 +600,11 @@ def test_transport_pauses_after_free_ce_limit(monkeypatch, capsys):
         on_error=errors.append,
     )
 
-    transport._do_upload(b"{}", None)
+    with caplog.at_level(logging.WARNING, logger="incidentary.transport"):
+        transport._do_upload(b"{}", None)
 
     assert transport.is_healthy is False
     assert transport._can_attempt_request() is False
     assert errors
     assert "Pausing ingest until" in str(errors[0])
-    assert "incidentary_ce_limit_reached" in capsys.readouterr().out
+    assert "CE limit reached" in caplog.text

@@ -8,13 +8,13 @@ from incidentary.types import SkeletonCe
 
 def make_ce(wall_ts_ns: int | None = None) -> SkeletonCe:
     return SkeletonCe(
-        ce_id=str(uuid.uuid4()),
+        id=str(uuid.uuid4()),
         trace_id=str(uuid.uuid4()),
-        parent_ce_id=None,
+        parent_id=None,
         service_id="svc",
-        wall_ts_ns=wall_ts_ns if wall_ts_ns is not None else int(time.time() * 1_000_000_000),
-        kind="HTTP_IN",
-        status=200,
+        occurred_at=wall_ts_ns if wall_ts_ns is not None else int(time.time() * 1_000_000_000),
+        kind="HTTP_SERVER",
+        status_code=200,
         duration_ns=1_000,
     )
 
@@ -45,7 +45,7 @@ def test_flush_respects_cutoff_and_clears():
 
     flushed = buf.flush()
     assert len(flushed) == 1
-    assert flushed[0].wall_ts_ns == recent_ns
+    assert flushed[0].occurred_at == recent_ns
     assert buf.size == 0
 
 
@@ -61,8 +61,8 @@ def test_flush_returns_sorted_by_wall_ts():
     buf.write(ce3)
 
     flushed = buf.flush()
-    assert [ce.wall_ts_ns for ce in flushed] == sorted(
-        [ce1.wall_ts_ns, ce2.wall_ts_ns, ce3.wall_ts_ns]
+    assert [ce.occurred_at for ce in flushed] == sorted(
+        [ce1.occurred_at, ce2.occurred_at, ce3.occurred_at]
     )
 
 

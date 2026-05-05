@@ -27,13 +27,13 @@ def make_client(**overrides):
 
 def make_ce() -> SkeletonCe:
     return SkeletonCe(
-        ce_id=str(uuid.uuid4()),
+        id=str(uuid.uuid4()),
         trace_id=str(uuid.uuid4()),
-        parent_ce_id=None,
+        parent_id=None,
         service_id="svc",
-        wall_ts_ns=int(time.time() * 1_000_000_000),
-        kind="HTTP_IN",
-        status=200,
+        occurred_at=int(time.time() * 1_000_000_000),
+        kind="HTTP_SERVER",
+        status_code=200,
         duration_ns=1_000,
     )
 
@@ -173,28 +173,23 @@ def test_record_event_wrappers_emit_queue_job_webhook_vocabulary():
     by_type = {event.event_type: event for event in events}
 
     assert by_type["queue_publish"].kind == "QUEUE_PUBLISH"
-    assert by_type["queue_publish"].status == 0
-    assert by_type["queue_publish"].event_class == "causal"
+    assert by_type["queue_publish"].status_code == 0
 
     assert by_type["queue_consume"].kind == "QUEUE_CONSUME"
-    assert by_type["queue_consume"].status == 0
-    assert by_type["queue_consume"].event_class == "causal"
+    assert by_type["queue_consume"].status_code == 0
 
     assert by_type["job_start"].kind == "INTERNAL"
-    assert by_type["job_start"].status == 0
-    assert by_type["job_start"].event_class == "causal"
+    assert by_type["job_start"].status_code == 0
 
     assert by_type["job_end"].kind == "INTERNAL"
-    assert by_type["job_end"].status == 0
-    assert by_type["job_end"].event_class == "causal"
+    assert by_type["job_end"].status_code == 0
 
-    assert by_type["webhook_in"].kind == "HTTP_IN"
-    assert by_type["webhook_in"].status == 200
-    assert by_type["webhook_in"].event_class == "causal"
+    assert by_type["webhook_in"].kind == "HTTP_SERVER"
+    assert by_type["webhook_in"].status_code == 200
 
-    assert by_type["webhook_out"].kind == "HTTP_OUT"
-    assert by_type["webhook_out"].status == 202
-    assert by_type["webhook_out"].event_attrs == {"endpoint": "payments"}
+    assert by_type["webhook_out"].kind == "HTTP_CLIENT"
+    assert by_type["webhook_out"].status_code == 202
+    assert by_type["webhook_out"].attributes == {"endpoint": "payments"}
 
 
 def test_flush_annotates_prealert_events_with_ring_buffer_metadata():
@@ -474,13 +469,15 @@ class TestEscalateToIncident:
 class TestEventTypeMapping:
     def test_http_in_kind(self):
         client = make_client()
-        assert client._event_type_to_kind("http_in") == "HTTP_IN"
-        assert client._event_type_to_kind("webhook_in") == "HTTP_IN"
+        assert client._event_type_to_kind("http_in") == "HTTP_SERVER"
+        assert client._event_type_to_kind("http_server") == "HTTP_SERVER"
+        assert client._event_type_to_kind("webhook_in") == "HTTP_SERVER"
 
     def test_http_out_kind(self):
         client = make_client()
-        assert client._event_type_to_kind("http_out") == "HTTP_OUT"
-        assert client._event_type_to_kind("webhook_out") == "HTTP_OUT"
+        assert client._event_type_to_kind("http_out") == "HTTP_CLIENT"
+        assert client._event_type_to_kind("http_client") == "HTTP_CLIENT"
+        assert client._event_type_to_kind("webhook_out") == "HTTP_CLIENT"
 
     def test_queue_kinds(self):
         client = make_client()
@@ -515,7 +512,7 @@ class TestRecordEvent:
         events = client._buffer.flush()
         assert len(events) == 1
         assert events[0].event_type == "http_in"
-        assert events[0].kind == "HTTP_IN"
+        assert events[0].kind == "HTTP_SERVER"
 
     def test_record_event_with_options(self):
         client = make_client()
@@ -530,7 +527,7 @@ class TestRecordEvent:
         )
         events = client._buffer.flush()
         assert len(events) == 1
-        assert events[0].status == 404
+        assert events[0].status_code == 404
         assert events[0].trace_id == "trace-1"
         assert events[0].duration_ns == 5000
 

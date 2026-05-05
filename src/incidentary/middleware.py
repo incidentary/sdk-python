@@ -100,15 +100,14 @@ class IncidentaryWSGIMiddleware:
         )
 
         ce_base = SkeletonCe(
-            ce_id=ce_id,
+            id=ce_id,
             trace_id=trace_id,
-            parent_ce_id=parent_ce,
+            parent_id=parent_ce,
             service_id=self._client.service_name,
-            wall_ts_ns=int(time.time() * 1_000_000_000),
-            kind=CeKind.HTTP_IN.value,
-            event_type="http_in",
-            event_class="causal",
-            status=status_code,
+            occurred_at=int(time.time() * 1_000_000_000),
+            kind=CeKind.HTTP_SERVER.value,
+            event_type="http_server",
+            status_code=status_code,
             duration_ns=duration_ns,
         )
         detail = _build_inbound_detail(self._client, environ, headers, captured_headers)
@@ -173,15 +172,14 @@ class IncidentaryASGIMiddleware:
         )
 
         ce_base = SkeletonCe(
-            ce_id=ce_id,
+            id=ce_id,
             trace_id=trace_id,
-            parent_ce_id=parent_ce,
+            parent_id=parent_ce,
             service_id=self._client.service_name,
-            wall_ts_ns=int(time.time() * 1_000_000_000),
-            kind=CeKind.HTTP_IN.value,
-            event_type="http_in",
-            event_class="causal",
-            status=status_code,
+            occurred_at=int(time.time() * 1_000_000_000),
+            kind=CeKind.HTTP_SERVER.value,
+            event_type="http_server",
+            status_code=status_code,
             duration_ns=duration_ns,
         )
         self._client.write_event(ce_base)
@@ -257,15 +255,14 @@ def instrumented_urlopen(
         )
 
         ce_base = SkeletonCe(
-            ce_id=ce_id,
+            id=ce_id,
             trace_id=trace_id,
-            parent_ce_id=parent_ce,
+            parent_id=parent_ce,
             service_id=client.service_name,
-            wall_ts_ns=int(time.time() * 1_000_000_000),
-            kind=CeKind.HTTP_OUT.value,
-            event_type="http_out",
-            event_class="causal",
-            status=status_code,
+            occurred_at=int(time.time() * 1_000_000_000),
+            kind=CeKind.HTTP_CLIENT.value,
+            event_type="http_client",
+            status_code=status_code,
             duration_ns=duration_ns,
         )
         detail = _build_outbound_detail(

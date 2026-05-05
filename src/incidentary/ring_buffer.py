@@ -39,11 +39,11 @@ class RingBuffer:
             for i in range(n):
                 idx = (self._head - n + i + self._capacity) % self._capacity
                 slot = self._slots[idx]
-                if slot is not None and slot.wall_ts_ns >= cutoff_ns:
+                if slot is not None and slot.occurred_at >= cutoff_ns:
                     result.append(slot)
 
             self._clear_unlocked()
-        result.sort(key=lambda ce: (ce.wall_ts_ns, ce.ce_id))
+        result.sort(key=lambda ce: (ce.occurred_at, ce.id))
         return result
 
     def clear(self) -> None:

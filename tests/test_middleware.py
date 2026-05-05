@@ -213,7 +213,7 @@ class TestASGIMiddleware:
 
         assert len(client.events) == 1
         assert client.events[0].trace_id == "trace-asgi"
-        assert client.events[0].parent_ce_id == "parent-asgi"
+        assert client.events[0].parent_id == "parent-asgi"
         assert client.request_calls[0][0] == 201
 
     async def test_asgi_middleware_default_status_when_no_response_start(self):
@@ -266,7 +266,7 @@ class TestInstrumentedUrlopenErrors:
             instrumented_urlopen(client, None, "http://example.com/test")
 
         assert client.request_calls[0][0] == 502
-        assert client.events[0].status == 502
+        assert client.events[0].status_code == 502
 
     def test_timeout_error_sets_timed_out_flag(self, monkeypatch):
         monkeypatch.setattr(

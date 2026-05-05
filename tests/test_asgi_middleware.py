@@ -215,8 +215,8 @@ def test_asgi_middleware_writes_event():
 
     assert len(client.events) == 1
     ce = client.events[0]
-    assert ce.kind == "HTTP_IN"
-    assert ce.status == 200
+    assert ce.kind == "HTTP_SERVER"
+    assert ce.status_code == 200
 
 
 def test_asgi_middleware_generates_trace_id_when_missing():
@@ -232,4 +232,4 @@ def test_asgi_middleware_generates_trace_id_when_missing():
     assert len(client.events) == 1
     ce = client.events[0]
     assert ce.trace_id  # non-empty
-    assert ce.parent_ce_id is None
+    assert ce.parent_id is None

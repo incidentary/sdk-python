@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import calendar
 import json
+import logging
 import threading
 import time
 import urllib.error
@@ -18,8 +19,9 @@ from dataclasses import asdict, is_dataclass
 
 from .types import SkeletonCe
 
-SDK_VERSION = "0.2.0"
-SCHEMA_VERSION = "1"
+SDK_VERSION = "1.0.0"
+
+_LOGGER_NAME = "incidentary.transport"
 
 
 class Transport:
@@ -36,6 +38,8 @@ class Transport:
         timeout_ms: int = 5000,
         on_error: Callable[[Exception], None] | None = None,
         circuit_breaker_cooldown_ms: int = 60_000,
+        on_flush_latency: Callable[[float], None] | None = None,
+        on_capture_mode_requested: Callable[[str], None] | None = None,
     ):
         self.base_url = (base_url or api_url or "").strip().rstrip("/")
         self.api_key = api_key
@@ -45,16 +49,24 @@ class Transport:
         self.timeout_ms = timeout_ms
         self.on_error = on_error
         self.circuit_breaker_cooldown_ms = circuit_breaker_cooldown_ms
+        self._on_flush_latency = on_flush_latency
+        self._on_capture_mode_requested = on_capture_mode_requested
 
         self._backend_healthy = True
         self._consecutive_failures = 0
         self._circuit_open_until_ms = 0
         self._quota_pause_until_ms = 0
         self._warned_missing_base_url = False
+        self._agent_telemetry: dict[str, object] = {}
         self._lock = threading.Lock()
 
         if not self.base_url:
             self._warn_missing_base_url()
+
+    def set_agent_telemetry(self, telemetry: dict[str, object]) -> None:
+        """Set telemetry fields to include in agent section of upload payloads."""
+        with self._lock:
+            self._agent_telemetry = dict(telemetry)
 
     @property
     def is_healthy(self) -> bool:
@@ -67,6 +79,42 @@ class Transport:
             return False
         return self._backend_healthy or int(time.time() * 1000) >= self._circuit_open_until_ms
 
+    def _build_payload(
+        self,
+        events: Iterable[SkeletonCe],
+        capture_mode: str = "SKELETON",
+    ) -> dict | None:
+        """Build the ingest payload dict. Returns None on empty events or error."""
+        try:
+            agent: dict[str, object] = {
+                "type": "sdk",
+                "version": SDK_VERSION,
+                "language": "python",
+                "workspace_id": self.workspace_id,
+            }
+            with self._lock:
+                if self._agent_telemetry:
+                    agent["telemetry"] = dict(self._agent_telemetry)
+
+            payload = {
+                "specversion": "2",
+                "resource": {
+                    "service.name": self.service_name,
+                    "deployment.environment": self.environment,
+                },
+                "agent": agent,
+                "flushed_at": int(time.time() * 1_000_000_000),
+                "capture_mode": capture_mode,
+                "events": [
+                    asdict(event) if is_dataclass(event) else event.__dict__ for event in events
+                ],
+            }
+            if not payload["events"]:
+                return None
+            return payload
+        except Exception:
+            return None
+
     def upload_batch(
         self,
         events: Iterable[SkeletonCe],
@@ -74,25 +122,8 @@ class Transport:
         incident_id: str | None = None,
     ) -> None:
         try:
-            payload = {
-                "schema_version": SCHEMA_VERSION,
-                "workspace_id": self.workspace_id,
-                "service_id": self.service_name,
-                "environment": self.environment,
-                "flushed_at": int(time.time() * 1_000_000_000),
-                "capture_mode": capture_mode,
-                "events": [
-                    asdict(event) if is_dataclass(event) else event.__dict__ for event in events
-                ],
-                "sdk_telemetry": {
-                    "sdk_version": SDK_VERSION,
-                    "sdk_language": "python",
-                    "queue_depth": 0,
-                    "dropped_ce_count": 0,
-                    "flush_latency_ms": 0,
-                },
-            }
-            if not payload["events"] or not self._can_attempt_request():
+            payload = self._build_payload(events, capture_mode)
+            if payload is None or not self._can_attempt_request():
                 return
             body = json.dumps(payload).encode("utf-8")
         except Exception:
@@ -126,16 +157,19 @@ class Transport:
         if not self.base_url:
             return
 
+        _logger = logging.getLogger(_LOGGER_NAME)
+        start_ms = time.monotonic() * 1000
+
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
-            "X-Incidentary-SDK-Version": SDK_VERSION,
+            "X-Incidentary-Agent-Version": SDK_VERSION,
         }
         if incident_id:
             headers["X-Incidentary-Incident-Id"] = incident_id
 
         req = urllib.request.Request(
-            f"{self.base_url}/api/v1/ingest/batch",
+            f"{self.base_url}/api/v2/ingest",
             data=body,
             headers=headers,
             method="POST",
@@ -147,6 +181,9 @@ class Transport:
                 with urllib.request.urlopen(req, timeout=self.timeout_ms / 1000) as response:
                     if 200 <= response.status < 300:
                         self._on_success()
+                        self._report_flush_latency(start_ms)
+                        self._read_capture_mode_requested(response)
+                        _parse_ingest_response(response, _logger)
                         return
             except urllib.error.HTTPError as err:
                 body_bytes = err.read()
@@ -155,19 +192,12 @@ class Transport:
                         data = json.loads(body_bytes.decode("utf-8"))
                     except Exception:
                         data = {}
-                    print(
-                        json.dumps(
-                            {
-                                "event": "incidentary_sdk_version_rejected",
-                                "code": data.get("error", {}).get("code", "SDK_VERSION_TOO_OLD"),
-                                "minimum_version": data.get("error", {}).get(
-                                    "minimum_version", "unknown"
-                                ),
-                                "current_version": data.get("error", {}).get(
-                                    "current_version", SDK_VERSION
-                                ),
-                            }
-                        )
+                    _logger.warning(
+                        "Incidentary SDK version rejected: code=%s minimum_version=%s "
+                        "current_version=%s",
+                        data.get("error", {}).get("code", "SDK_VERSION_TOO_OLD"),
+                        data.get("error", {}).get("minimum_version", "unknown"),
+                        data.get("error", {}).get("current_version", SDK_VERSION),
                     )
                     self._on_success()
                     return
@@ -247,6 +277,27 @@ class Transport:
                 )
         self._dispatch_error(error)
 
+    def _report_flush_latency(self, start_ms: float) -> None:
+        """Report flush round-trip latency to the callback, if registered."""
+        if self._on_flush_latency is None:
+            return
+        try:
+            elapsed_ms = time.monotonic() * 1000 - start_ms
+            self._on_flush_latency(max(0.0, elapsed_ms))
+        except Exception:
+            pass
+
+    def _read_capture_mode_requested(self, response: object) -> None:
+        """Read X-Capture-Mode-Requested header from response and notify via callback."""
+        if self._on_capture_mode_requested is None:
+            return
+        try:
+            value = response.getheader("X-Capture-Mode-Requested")  # type: ignore[union-attr]
+            if value is not None:
+                self._on_capture_mode_requested(value)
+        except Exception:
+            pass
+
     def _dispatch_error(self, error: Exception) -> None:
         if self.on_error is None:
             return
@@ -280,15 +331,12 @@ class Transport:
         with self._lock:
             self._quota_pause_until_ms = reset_at_ms
 
-        print(
-            json.dumps(
-                {
-                    "event": "incidentary_ce_limit_reached",
-                    "plan": "free",
-                    "limit": payload.get("limit"),
-                    "reset_at": reset_at_iso,
-                }
-            )
+        _logger = logging.getLogger(_LOGGER_NAME)
+        _logger.warning(
+            "Incidentary CE limit reached for the free plan. "
+            "plan=free limit=%s reset_at=%s",
+            payload.get("limit"),
+            reset_at_iso,
         )
         self._dispatch_error(
             RuntimeError(
@@ -296,6 +344,25 @@ class Transport:
             )
         )
         return True
+
+
+def _parse_ingest_response(response: object, _logger: logging.Logger) -> None:
+    """Parse V2 ingest response and log if events were dropped."""
+    try:
+        body_bytes = response.read()  # type: ignore[union-attr]
+        if not body_bytes:
+            return
+        data = json.loads(body_bytes.decode("utf-8"))
+        dropped = data.get("dropped", 0)
+        if dropped > 0:
+            drop_reasons = data.get("drop_reasons", {})
+            _logger.warning(
+                "Incidentary ingest dropped %d event(s): %s",
+                dropped,
+                drop_reasons,
+            )
+    except Exception:
+        pass
 
 
 def _normalize_error(error: Exception) -> Exception:

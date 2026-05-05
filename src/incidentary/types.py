@@ -16,8 +16,10 @@ RetryKeyQuality = Literal[
 
 PreArmTriggerType = Literal["slow_success", "in_flight_pileup", "retry_onset", "error_rate_5xx"]
 PreArmTriggerSeverity = Literal["mild", "severe"]
-RequestKind = Literal["HTTP_IN", "HTTP_OUT"]
+RequestKind = Literal["HTTP_SERVER", "HTTP_CLIENT", "HTTP_IN", "HTTP_OUT"]
 IncidentaryEventType = Literal[
+    "http_server",
+    "http_client",
     "http_in",
     "http_out",
     "queue_publish",
@@ -28,8 +30,12 @@ IncidentaryEventType = Literal[
     "webhook_out",
     "internal_task",
     "db_query",
+    "db_connect",
     "grpc_in",
     "grpc_out",
+    "rpc_server",
+    "rpc_client",
+    "job",
 ]
 IncidentaryEventClass = Literal["causal", "context"]
 
@@ -41,11 +47,20 @@ class CaptureMode(StrEnum):
 
 
 class CeKind(StrEnum):
-    HTTP_IN = "HTTP_IN"
-    HTTP_OUT = "HTTP_OUT"
+    HTTP_SERVER = "HTTP_SERVER"
+    HTTP_CLIENT = "HTTP_CLIENT"
     QUEUE_PUBLISH = "QUEUE_PUBLISH"
     QUEUE_CONSUME = "QUEUE_CONSUME"
     INTERNAL = "INTERNAL"
+    DB_QUERY = "DB_QUERY"
+    DB_CONNECT = "DB_CONNECT"
+    RPC_SERVER = "RPC_SERVER"
+    RPC_CLIENT = "RPC_CLIENT"
+    JOB = "JOB"
+
+    # Backwards-compatible aliases (old V1 names)
+    HTTP_IN = "HTTP_SERVER"
+    HTTP_OUT = "HTTP_CLIENT"
 
 
 TRACE_ID_HEADER = "x-incidentary-trace-id"
@@ -69,21 +84,22 @@ class CeDetail:
 
 @dataclass
 class SkeletonCe:
-    ce_id: str
+    id: str
     trace_id: str
-    parent_ce_id: str | None
+    parent_id: str | None
     service_id: str
-    wall_ts_ns: int
+    occurred_at: int
     kind: str
-    status: int
+    status_code: int
     duration_ns: int
-    sdk_version: str = "0.2.0"
     captured_before_alert: bool | None = None
     ring_buffer_seq: int | None = None
     event_type: IncidentaryEventType | None = None
-    event_class: IncidentaryEventClass | None = None
-    event_attrs: dict[str, Any] | None = None
+    attributes: dict[str, Any] | None = None
     detail: CeDetail | None = None
+    severity: str | None = None
+    span_id: str | None = None
+    type: str | None = None
 
 
 @dataclass(frozen=True)
