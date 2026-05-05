@@ -21,6 +21,7 @@ from .prearm_triggers import (
     TriggerReason,
 )
 from .ring_buffer import RingBuffer
+from .trace_cap import TraceCap, TraceCapEvent
 from .transport import Transport
 from .types import (
     CaptureMode,
@@ -188,10 +189,12 @@ class IncidentaryClient:
         redact_fields: Iterable[str] | None = None,
         pre_arm_eval_shards: int = 16,
         pre_arm_eval_batch_size: int = 1,
+        max_flush_overhead_ms: int = 100,
         timeout_ms: int = 5_000,
         on_error: Callable[[Exception], None] | None = None,
         auto_instrument: bool = True,
         integrations: list[Integration] | None = None,
+        trace_cap_enabled: bool = True,
     ):
         resolved_base_url = (base_url or api_url or "").strip().rstrip("/")
         self.service_name = service_name
@@ -209,6 +212,14 @@ class IncidentaryClient:
         self._mode = CaptureMode.NORMAL
         self._window = _RollingWindow()
         self._buffer = RingBuffer(capacity=buffer_capacity)
+        # L1 trace cap — drops bytes before they hit the buffer when a
+        # single service emits a runaway trace. Spec at
+        # docs/specs/l1-trace-cap.md (in main incidentary repo).
+        self._trace_cap = TraceCap(
+            service_id=service_name,
+            enabled=trace_cap_enabled,
+        )
+        self._trace_cap_dropped_total = 0
         self._trigger_engine = TriggerEngine(
             TriggerEngineConfig(
                 enable_slow_success=pre_arm_enable_slow_success,
@@ -243,6 +254,10 @@ class IncidentaryClient:
             )
         )
 
+        self._max_flush_overhead_ms = max(1, max_flush_overhead_ms)
+        self._flush_latency_ema_ms: float = 0.0
+        self._current_batch_size: int = 100
+
         self._transport = Transport(
             base_url=resolved_base_url,
             api_url=api_url,
@@ -252,6 +267,8 @@ class IncidentaryClient:
             workspace_id=workspace_id,
             timeout_ms=timeout_ms,
             on_error=on_error,
+            on_flush_latency=self._on_flush_complete,
+            on_capture_mode_requested=self._on_capture_mode_requested,
         )
 
         self._detail_capture_enabled = pre_arm_detail_capture_enabled
@@ -397,16 +414,48 @@ class IncidentaryClient:
 
     def write_event(self, ce: SkeletonCe) -> None:
         try:
+            verdict = self._trace_cap.observe(ce.trace_id)
+            if verdict.should_drop:
+                self._trace_cap_dropped_total += 1
+                return
+            if verdict.tier == "truncating":
+                # Boundary span — mark it so downstream UIs can show the
+                # truncation point. All later spans for this trace drop
+                # before reaching this method.
+                attrs = dict(ce.attributes) if ce.attributes else {}
+                attrs["incidentary.trace.truncated_in_sdk"] = True
+                ce.attributes = attrs
+
+            should_flush = False
             with self._lock:
                 self._buffer.write(ce)
+                if self._buffer.size >= self._current_batch_size:
+                    should_flush = True
+            if should_flush:
+                self.flush_to_backend()
         except Exception:
             pass
+
+    def register_trace_cap_hook(
+        self, hook: Callable[[TraceCapEvent], None]
+    ) -> None:
+        """Register a callback invoked at most once per (trace_id, tier)
+        when the L1 trace cap detects a runaway trace in this client.
+        Useful for routing the structured signal into the customer's
+        existing observability pipeline.
+        """
+        self._trace_cap.set_hook(hook)
+
+    def get_trace_cap_dropped_total(self) -> int:
+        """Cumulative count of spans dropped at L1 by this client."""
+        return self._trace_cap_dropped_total
 
     def flush_to_backend(self, incident_id: str | None = None) -> None:
         try:
             with self._lock:
                 mode = "FULL" if self._mode != CaptureMode.NORMAL else "SKELETON"
                 events = self._annotate_buffered_events_locked(self._buffer.flush())
+            self._sync_telemetry()
             self._transport.upload_batch(events, capture_mode=mode, incident_id=incident_id)
         except Exception:
             pass
@@ -449,22 +498,20 @@ class IncidentaryClient:
         try:
             opts = options if options is not None else RecordEventOptions()
             ce = SkeletonCe(
-                ce_id=str(uuid.uuid4()),
+                id=str(uuid.uuid4()),
                 trace_id=opts.trace_id or str(uuid.uuid4()),
-                parent_ce_id=opts.parent_ce_id,
+                parent_id=opts.parent_ce_id,
                 service_id=self.service_name,
-                wall_ts_ns=opts.wall_ts_ns
+                occurred_at=opts.wall_ts_ns
                 if opts.wall_ts_ns is not None
                 else int(time.time() * 1_000_000_000),
                 kind=self._event_type_to_kind(event_type),
                 event_type=event_type,
-                event_class="causal",
-                event_attrs=opts.event_attrs,
-                status=opts.status
+                attributes=opts.event_attrs,
+                status_code=opts.status
                 if opts.status is not None
                 else self._event_type_default_status(event_type),
                 duration_ns=max(0, int(opts.duration_ns)),
-                sdk_version="0.2.0",
             )
             self.write_event(ce)
         except Exception:
@@ -548,18 +595,31 @@ class IncidentaryClient:
                 self._active_pre_arm_window = None
 
     def _event_type_to_kind(self, event_type: IncidentaryEventType) -> str:
-        if event_type in ("http_in", "webhook_in"):
-            return "HTTP_IN"
-        if event_type in ("http_out", "webhook_out"):
-            return "HTTP_OUT"
+        if event_type in ("http_in", "http_server", "webhook_in"):
+            return "HTTP_SERVER"
+        if event_type in ("http_out", "http_client", "webhook_out"):
+            return "HTTP_CLIENT"
         if event_type == "queue_publish":
             return "QUEUE_PUBLISH"
         if event_type == "queue_consume":
             return "QUEUE_CONSUME"
+        if event_type == "db_query":
+            return "DB_QUERY"
+        if event_type == "db_connect":
+            return "DB_CONNECT"
+        if event_type in ("grpc_in", "rpc_server"):
+            return "RPC_SERVER"
+        if event_type in ("grpc_out", "rpc_client"):
+            return "RPC_CLIENT"
+        if event_type == "job":
+            return "JOB"
         return "INTERNAL"
 
     def _event_type_default_status(self, event_type: IncidentaryEventType) -> int:
-        if event_type in ("http_in", "http_out", "webhook_in", "webhook_out"):
+        if event_type in (
+            "http_in", "http_out", "http_server", "http_client",
+            "webhook_in", "webhook_out",
+        ):
             return 200
         return 0
 
@@ -710,7 +770,7 @@ class IncidentaryClient:
             return events
 
         for event in events:
-            if event.wall_ts_ns > self._pre_arm_alerted_at_ns:
+            if event.occurred_at > self._pre_arm_alerted_at_ns:
                 continue
             event.captured_before_alert = True
             event.ring_buffer_seq = self._pre_arm_ring_buffer_seq
@@ -912,6 +972,45 @@ class IncidentaryClient:
             return json.dumps(scrub(parsed), separators=(",", ":"))
         except Exception:
             return raw
+
+    _BATCH_SIZE_MIN = 10
+    _BATCH_SIZE_MAX = 5000
+    _EMA_ALPHA = 0.3
+
+    def _update_flush_latency_ema(self, latency_ms: float) -> None:
+        """Update the exponential moving average for flush latency."""
+        self._flush_latency_ema_ms = (
+            self._EMA_ALPHA * latency_ms + (1.0 - self._EMA_ALPHA) * self._flush_latency_ema_ms
+        )
+
+    def _on_flush_complete(self, latency_ms: float) -> None:
+        """Called by transport after a successful flush. Updates EMA and adjusts batch size."""
+        self._update_flush_latency_ema(latency_ms)
+
+        ceiling = self._max_flush_overhead_ms
+        ema = self._flush_latency_ema_ms
+
+        if ema < ceiling * 0.5:
+            new_size = int(self._current_batch_size * 1.2)
+        elif ema > ceiling * 0.9:
+            new_size = int(self._current_batch_size * 0.7)
+        else:
+            new_size = self._current_batch_size
+
+        self._current_batch_size = max(
+            self._BATCH_SIZE_MIN, min(self._BATCH_SIZE_MAX, new_size)
+        )
+
+    def _on_capture_mode_requested(self, mode: str) -> None:
+        """Called by transport when backend sends X-Capture-Mode-Requested header."""
+        logger.info("Backend capture mode requested: %s", mode)
+
+    def _sync_telemetry(self) -> None:
+        """Push current adaptive batch telemetry to the transport for inclusion in payloads."""
+        self._transport.set_agent_telemetry({
+            "flush_latency_ema_ms": round(self._flush_latency_ema_ms, 2),
+            "current_batch_size": self._current_batch_size,
+        })
 
     @staticmethod
     def _now_clock() -> _Clock:
