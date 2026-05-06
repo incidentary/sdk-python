@@ -1,7 +1,4 @@
-"""Tests for the integration registry (Phase 0).
-
-TDD: Tests written first, before implementation.
-"""
+"""Tests for the integration registry."""
 
 from __future__ import annotations
 
